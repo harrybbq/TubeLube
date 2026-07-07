@@ -32,6 +32,26 @@ pip install -r requirements.txt
 
 The app checks for ffmpeg/yt-dlp on launch and shows install instructions if anything is missing.
 
+### Fresh setup on a new machine (e.g. at work)
+
+After cloning the repo:
+
+1. **Python deps:** `pip install -r requirements.txt`
+2. **ffmpeg** on PATH (see above).
+3. **Deno** — YouTube obfuscates download URLs with a JS challenge that yt-dlp
+   solves via a JavaScript runtime. Install Deno so downloads work:
+   - Windows: `winget install DenoLand.Deno` (then open a fresh terminal)
+   - macOS/Linux: `curl -fsSL https://deno.land/install.sh | sh`
+4. **`cookies.txt`** — YouTube increasingly requires a signed-in session
+   ("Sign in to confirm you're not a bot"). This file is **not** in the repo
+   (it holds live session tokens). To create it: install the *Get cookies.txt
+   LOCALLY* browser extension, sign in at youtube.com, export, and save the
+   file as `cookies.txt` in the project root. TubeLube auto-detects it.
+   You only need this if you hit the bot wall.
+
+> Note: your saved playlists (`playset.json`) are also local-only, so a fresh
+> clone starts with an empty library.
+
 ## Run
 
 ```bash
