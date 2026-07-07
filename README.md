@@ -63,6 +63,36 @@ automatically — no desktop app needed. On Windows you can just **double-click
 `run_web.bat`** instead of typing the command. Keep the terminal/window open
 while you use it; close it to stop the app.
 
+## Use it from your phone
+
+TubeLube can serve its UI to your phone over your home Wi-Fi — the PC still does
+the downloading/converting, your phone is just the remote control:
+
+```bash
+python app.py --lan
+```
+
+(or double-click **`run_phone.bat`** on Windows). The terminal prints the address
+to open — `http://<your-pc-ip>:5001` — plus a QR code you can scan with your
+phone's camera. Requirements and caveats:
+
+- Phone and PC must be on the **same network**, and the PC must stay on.
+- **Windows firewall:** the first LAN run pops a prompt — allow Python on
+  *private* networks, or the phone won't connect.
+- Converted files are saved on the PC as usual; on the phone you get a
+  **Download** button (and the folder icon in the top bar re-downloads the last
+  file) instead of "Open folder".
+- The folder *Browse* picker is desktop-only (it opens a dialog on the PC), so
+  it's hidden on remote devices — the save-to path still shows where the PC
+  keeps the files.
+- Anyone on your Wi-Fi can reach the app while it runs in LAN mode, so use it
+  on networks you trust (there's no login). Plain `python app.py` stays
+  localhost-only, exactly as before.
+
+If you want access *away* from home too, run something like
+[Tailscale](https://tailscale.com/) on the PC and phone and open the PC's
+Tailscale IP the same way — no TubeLube changes needed.
+
 ## Run as a desktop app
 
 Same app, in its own native window instead of a browser tab (uses pywebview + the

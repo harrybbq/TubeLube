@@ -40,6 +40,9 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; }
+  /* Phones: 100% of the body can be taller than the visible viewport because
+     of the browser chrome; dvh tracks what's actually visible. */
+  @supports (height: 100dvh) { html, body, #root, .app { height: 100dvh; } }
   body {
     font-family: var(--font-sans);
     font-size: 14px; line-height: 1.5; color: var(--ink);
@@ -101,6 +104,7 @@
     transition: background .15s ease, color .15s ease, border-color .15s ease;
   }
   .icon-btn:hover { background: rgba(0,0,0,0.4); color: var(--ink); border-color: var(--panel-edge); }
+  .lib-toggle { display: none; } /* shown on narrow screens where the sidebar becomes a drawer */
   .top-center { display: flex; align-items: center; gap: 10px; justify-content: center; }
   .home-btn {
     width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
@@ -355,7 +359,7 @@
   .tb-play:hover { transform: scale(1.06); background: #fff; }
   .scrub-line { display: flex; align-items: center; gap: 10px; width: 100%; }
   .scrub-line .tt { font-family: var(--font-mono); font-size: 11px; color: var(--ink-mute); min-width: 36px; text-align: center; }
-  .scrub { flex: 1; height: 14px; position: relative; cursor: pointer; }
+  .scrub { flex: 1; height: 14px; position: relative; cursor: pointer; touch-action: none; }
   .scrub-track { position: absolute; top: 50%; left: 0; right: 0; height: 3px; background: rgba(232,228,214,0.12); transform: translateY(-50%); border-radius: 3px; }
   .scrub-fill { position: absolute; top: 50%; left: 0; height: 3px; width:0; background: var(--ember); transform: translateY(-50%); border-radius: 3px; }
   .scrub-thumb { position: absolute; top: 50%; left:0; width: 11px; height: 11px; background: var(--ember); transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity .15s ease; }
@@ -363,7 +367,7 @@
 
   .player-right { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
   .vol { display: flex; align-items: center; gap: 8px; width: 130px; color: var(--ink-mute); }
-  .vol .vtrack { flex: 1; height: 3px; background: rgba(232,228,214,0.12); border-radius: 3px; position: relative; cursor: pointer; }
+  .vol .vtrack { flex: 1; height: 3px; background: rgba(232,228,214,0.12); border-radius: 3px; position: relative; cursor: pointer; touch-action: none; }
   .vol .vfill { position:absolute; left:0; top:0; bottom:0; width: 50%; background: var(--ink-soft); border-radius: 3px; }
   .vol .vfill::after { content:""; position:absolute; right:-4px; top:50%; width:9px; height:9px; border-radius:50%; background: var(--ink); transform: translateY(-50%); }
 
@@ -381,9 +385,47 @@
   @media (max-width: 1040px) { .vinyl-stage { display:none; } .main-body { max-width:none; } }
   @media (max-width: 820px) {
     .app { grid-template-columns: minmax(0,1fr); grid-template-areas: "topbar" "main" "player"; }
-    .sidebar { display: none; }
+    /* Sidebar becomes a slide-in drawer, opened from the topbar library button. */
+    .sidebar {
+      position: fixed; z-index: 70;
+      top: calc(56px + var(--shell-gap) * 2); bottom: calc(84px + var(--shell-gap) * 2);
+      left: var(--shell-gap); width: min(320px, 86vw);
+      transform: translateX(calc(-100% - 24px)); transition: transform .22s ease;
+      background: rgba(7, 12, 20, 0.92);
+    }
+    .sidebar.open { transform: none; }
+    .lib-toggle { display: grid; }
     .searchbar { width: 260px; }
     .hero-title { font-size: 40px; }
+  }
+  .drawer-scrim { display: none; position: fixed; inset: 0; z-index: 65; background: rgba(5,10,18,0.55); }
+  .drawer-scrim.show { display: block; }
+  @media (max-width: 600px) {
+    .app { grid-template-rows: 52px minmax(0,1fr) 92px; }
+    .topbar { grid-template-columns: 1fr auto; padding: 0 12px; }
+    .nav-btns, .top-center, .win-dots { display: none; }
+    .sidebar { top: calc(52px + var(--shell-gap) * 2); bottom: calc(92px + var(--shell-gap) * 2); }
+    .main-hero { padding: 22px 18px 14px; gap: 16px; }
+    .hero-cover { width: 84px; height: 84px; }
+    .hero-title { font-size: 30px; }
+    .hero-sub { font-size: 12.5px; }
+    .action-row { padding: 14px 18px 4px; gap: 14px; }
+    .main-body { padding: 12px 18px 32px; gap: 20px; }
+    .speed-num { font-size: 38px; }
+    .path-row { flex-wrap: wrap; }
+    .player { grid-template-columns: auto minmax(0,1fr); padding: 0 12px; gap: 12px; }
+    .player-right { display: none; }
+    .np { gap: 10px; }
+    .np-art { width: 44px; height: 44px; }
+    .np-meta { max-width: 30vw; }
+    .transport { width: 100%; gap: 5px; }
+    .transport-btns { gap: 14px; }
+    .toast { bottom: 112px; width: max-content; max-width: calc(100vw - 24px); }
+  }
+  /* Touch devices: hover can't reveal controls, so keep them visible. */
+  @media (pointer: coarse) {
+    .scrub-thumb, .lib-remove { opacity: 1; }
+    .scrub { height: 22px; }
   }
 </style>
 </head>
@@ -432,6 +474,7 @@
         <button class="icon-btn" title="Back"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3 L5 8 L10 13"/></svg></button>
         <button class="icon-btn" title="Forward"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3 L11 8 L6 13"/></svg></button>
       </div>
+      <button class="icon-btn lib-toggle" id="libToggle" title="Your library"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4 H14 M2 8 H14 M2 12 H10"/></svg></button>
     </div>
     <div class="top-center">
       <button class="home-btn" title="Home"><svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8 L9 3 L15 8 V15 H3 Z"/></svg></button>
@@ -641,12 +684,19 @@
 </div>
 </div>
 
+<div class="drawer-scrim" id="drawerScrim"></div>
+
 <div class="toast" id="toast"><span class="glyph" id="toastGlyph">Done</span><span id="toastText"></span><button class="btn" id="toastAction" style="display:none">Open folder</button></div>
 
 <audio id="previewAudio" preload="metadata"></audio>
 
 <script>
   const $ = (id) => document.getElementById(id);
+
+  // True when the page is viewed from another device (e.g. a phone on the LAN).
+  // Host-machine actions (folder picker, "open folder") don't apply there —
+  // remote viewers download the converted file instead.
+  const IS_REMOTE = !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 
   const state = { format: "mp3", quality: "192", localPath: null, localName: null };
   const QUALITY_OPTIONS = {
@@ -900,6 +950,15 @@
     finally { btn.disabled = false; btn.textContent = orig; }
   });
 
+  // ── Library drawer (narrow screens) ───────────────────────────────────
+  const sidebarEl = document.querySelector(".sidebar");
+  function closeDrawer() { sidebarEl.classList.remove("open"); $("drawerScrim").classList.remove("show"); }
+  $("libToggle").addEventListener("click", () => {
+    const open = sidebarEl.classList.toggle("open");
+    $("drawerScrim").classList.toggle("show", open);
+  });
+  $("drawerScrim").addEventListener("click", closeDrawer);
+
   // ── Library (sidebar) ─────────────────────────────────────────────────
   function songMatchesFilter(s) {
     if (filter === "all") return true;
@@ -1023,6 +1082,7 @@
 
   async function startQueueAt(index) {
     if (!psongs.length) return;
+    closeDrawer();
     qActive = true;
     index = Math.max(0, Math.min(index, psongs.length - 1));
     playOrder = buildOrder(index);
@@ -1154,12 +1214,13 @@
       $("curTime").textContent = fmtTime(a.currentTime);
       if (a.duration) $("totTime").textContent = fmtTime(a.duration);
     });
-    // seek
+    // seek (pointer events so touch dragging works on phones)
     function seekFromEvent(e) { const r = $("scrub").getBoundingClientRect(); const p = Math.min(1, Math.max(0, (e.clientX - r.left)/r.width)); if (a.duration) a.currentTime = p * a.duration; }
     let seeking = false;
-    $("scrub").addEventListener("mousedown", (e) => { seeking = true; seekFromEvent(e); });
-    window.addEventListener("mousemove", (e) => { if (seeking) seekFromEvent(e); });
-    window.addEventListener("mouseup", () => { seeking = false; });
+    $("scrub").addEventListener("pointerdown", (e) => { seeking = true; $("scrub").setPointerCapture(e.pointerId); seekFromEvent(e); });
+    $("scrub").addEventListener("pointermove", (e) => { if (seeking) seekFromEvent(e); });
+    $("scrub").addEventListener("pointerup", () => { seeking = false; });
+    $("scrub").addEventListener("pointercancel", () => { seeking = false; });
   })();
 
   // ── Volume (default 50%) ──────────────────────────────────────────────
@@ -1169,9 +1230,10 @@
     apply(0.5);
     let dragging = false;
     function fromEvent(e) { const r = track.getBoundingClientRect(); apply((e.clientX - r.left)/r.width); }
-    track.addEventListener("mousedown", (e) => { dragging = true; fromEvent(e); });
-    window.addEventListener("mousemove", (e) => { if (dragging) fromEvent(e); });
-    window.addEventListener("mouseup", () => { dragging = false; });
+    track.addEventListener("pointerdown", (e) => { dragging = true; track.setPointerCapture(e.pointerId); fromEvent(e); });
+    track.addEventListener("pointermove", (e) => { if (dragging) fromEvent(e); });
+    track.addEventListener("pointerup", () => { dragging = false; });
+    track.addEventListener("pointercancel", () => { dragging = false; });
     a.addEventListener("volumechange", () => { fill.style.width = (a.volume*100) + "%"; });
   })();
 
@@ -1266,7 +1328,10 @@
       if (data.status === "done") {
         showProgress(false);
         window._lastOutput = data.output_path;
-        toast("Converted: " + (data.output_path||"").split(/[\\/]/).pop(), { action: { label: "Open folder", onClick: () => openFolder(data.output_path) } });
+        window._lastJobId = jobId;
+        const name = (data.output_path||"").split(/[\\/]/).pop();
+        if (IS_REMOTE) toast("Converted: " + name, { action: { label: "Download", onClick: () => downloadJob(jobId) } });
+        else toast("Converted: " + name, { action: { label: "Open folder", onClick: () => openFolder(data.output_path) } });
         return;
       }
       if (data.status === "error") { showProgress(false); throw new Error(data.error || "Conversion failed."); }
@@ -1276,7 +1341,22 @@
     if (!path) return;
     await fetch("/open_folder", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({path}) });
   }
-  $("openFolderIcon").addEventListener("click", () => { if (window._lastOutput) openFolder(window._lastOutput); else if ($("outDir").value) openFolder($("outDir").value); });
+  function downloadJob(jobId) { window.location.href = `/download/${jobId}`; }
+  $("openFolderIcon").addEventListener("click", () => {
+    if (IS_REMOTE) {
+      if (window._lastJobId) downloadJob(window._lastJobId);
+      else toast("Convert something first — the file will download here.", { glyph: "Info" });
+      return;
+    }
+    if (window._lastOutput) openFolder(window._lastOutput); else if ($("outDir").value) openFolder($("outDir").value);
+  });
+
+  // Remote viewers: the folder picker opens on the host PC, which is useless
+  // (and confusing) from a phone — hide it and repurpose the folder icon.
+  if (IS_REMOTE) {
+    $("browseBtn").style.display = "none";
+    $("openFolderIcon").title = "Download last converted file";
+  }
 
   // ── Init ──────────────────────────────────────────────────────────────
   setSpeed(1.0); syncPitch(); updateOutputDetails(); renderNowPlaying();

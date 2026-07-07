@@ -2,17 +2,23 @@
 
 Routes:
   GET  /                     UI (or install-prompt page if deps missing)
-  POST /pick_folder          native folder picker, returns chosen path
+  POST /pick_folder          native folder picker, returns chosen path (local only)
   POST /upload               accepts a dropped/picked local file, returns temp path
   POST /convert              starts a background job, returns job_id
   GET  /status/<job_id>      progress + status + result path
-  POST /open_folder          opens the OS file manager at a given folder
+  GET  /download/<job_id>    sends a finished job's output file (for phones/remote)
+  POST /open_folder          opens the OS file manager at a given folder (local only)
+
+Run `python app.py --lan` to also accept connections from other devices on
+your Wi-Fi (e.g. your phone) — it prints the address and a QR code to scan.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -23,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request, send_file, send_from_directory
 
 import converter
 import downloader
@@ -73,6 +79,24 @@ def _check_dependencies() -> list[str]:
     return missing
 
 
+def _request_is_local() -> bool:
+    """True when the request comes from this machine (not a phone/LAN device)."""
+    return request.remote_addr in ("127.0.0.1", "::1")
+
+
+def _lan_ip() -> Optional[str]:
+    """Best-effort LAN IP of this machine (no traffic is actually sent)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except OSError:
+        return None
+
+
 def _default_output_dir() -> str:
     """User's Downloads folder, or home dir as a fallback."""
     candidate = Path.home() / "Downloads"
@@ -92,6 +116,8 @@ def index():
 @app.route("/pick_folder", methods=["POST"])
 def pick_folder():
     """Open a native folder picker on the user's machine."""
+    if not _request_is_local():
+        return jsonify({"error": "Only available on the computer running TubeLube."}), 403
     try:
         import tkinter as tk
         from tkinter import filedialog
@@ -336,8 +362,24 @@ def status(job_id: str):
         })
 
 
+@app.route("/download/<job_id>")
+def download(job_id: str):
+    """Send a finished job's output file — how phones save the result, since
+    'open folder' only makes sense on the machine the server runs on."""
+    job = JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "Unknown job."}), 404
+    with job.lock:
+        path = job.output_path if job.status == "done" else None
+    if not path or not os.path.isfile(path):
+        return jsonify({"error": "No finished file for this job."}), 404
+    return send_file(path, as_attachment=True, download_name=Path(path).name)
+
+
 @app.route("/open_folder", methods=["POST"])
 def open_folder():
+    if not _request_is_local():
+        return jsonify({"error": "Only available on the computer running TubeLube."}), 403
     data = request.get_json(force=True, silent=True) or {}
     path = data.get("path", "")
     if not path:
@@ -362,7 +404,34 @@ def open_folder():
 
 
 def _open_browser():
-    webbrowser.open(f"http://{APP_HOST}:{APP_PORT}/")
+    # Always via loopback — APP_HOST may be 0.0.0.0 in LAN mode.
+    webbrowser.open(f"http://127.0.0.1:{APP_PORT}/")
+
+
+def _print_phone_banner() -> None:
+    ip = _lan_ip()
+    if not ip:
+        print("Couldn't work out this machine's LAN IP — find it with "
+              "`ipconfig` (Windows) or `ifconfig` (macOS/Linux) and open "
+              f"http://<that-ip>:{APP_PORT}/ on your phone.")
+        return
+    url = f"http://{ip}:{APP_PORT}/"
+    print()
+    print("=" * 46)
+    print("  On your phone (same Wi-Fi), open:")
+    print(f"    {url}")
+    print("=" * 46)
+    try:
+        import qrcode
+    except ImportError:
+        print("(pip install qrcode to get a scannable code here)")
+    else:
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(url)
+        qr.print_ascii(tty=False, invert=True)
+    print("If the phone can't connect, allow Python through your firewall")
+    print("(Windows shows a prompt on first run — tick 'Private networks').")
+    print()
 
 
 def run_server() -> None:
@@ -373,6 +442,17 @@ def run_server() -> None:
 
 
 def main() -> None:
+    global APP_HOST, APP_PORT
+    parser = argparse.ArgumentParser(description="TubeLube — local speed/pitch converter")
+    parser.add_argument("--lan", action="store_true",
+                        help="also accept connections from devices on your Wi-Fi/LAN "
+                             "(e.g. your phone); prints the address + QR code to scan")
+    parser.add_argument("--port", type=int, default=APP_PORT, help=f"port to listen on (default {APP_PORT})")
+    args = parser.parse_args()
+    APP_PORT = args.port
+    if args.lan:
+        APP_HOST = "0.0.0.0"
+        _print_phone_banner()
     # Web mode: open the default browser shortly after the server starts.
     threading.Timer(1.0, _open_browser).start()
     run_server()
