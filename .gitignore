@@ -1,0 +1,19 @@
+# Sensitive: contains your live YouTube session cookies
+cookies.txt
+cookies.txt.txt
+
+# Personal saved songs
+playset.json
+playset.json.tmp
+
+# Python
+__pycache__/
+*.pyc
+
+# Windows shortcuts are machine-specific
+TubeLube.lnk
+TubeLube (App).lnk
+
+# PyInstaller build artifacts
+build/
+dist/

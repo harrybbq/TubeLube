@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TubeLube — setup needed</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f7f6f3; color: #1f2937; margin: 0;
+    }
+    .wrap { max-width: 560px; margin: 64px auto; padding: 0 24px; }
+    h1 { font-size: 26px; margin: 0 0 8px; }
+    p { color: #6b7280; }
+    .card { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px 22px; margin-top: 20px; }
+    code { background: #f1f0ec; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+    pre  { background: #f1f0ec; padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+    .missing { color: #9b2b2b; font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>One thing left to set up</h1>
+    <p>TubeLube needs the following before it can run:</p>
+    <div class="card">
+      <p class="missing">Missing: {{ missing | join(', ') }}</p>
+
+      {% if 'ffmpeg' in missing %}
+      <h3>Install ffmpeg</h3>
+      <ul>
+        <li><strong>Windows:</strong> <code>winget install Gyan.FFmpeg</code> (or download from <a href="https://www.gyan.dev/ffmpeg/builds/">gyan.dev</a> and add to PATH)</li>
+        <li><strong>macOS:</strong> <code>brew install ffmpeg</code></li>
+        <li><strong>Linux:</strong> <code>sudo apt install ffmpeg</code></li>
+      </ul>
+      {% endif %}
+
+      {% if 'yt-dlp' in missing %}
+      <h3>Install yt-dlp</h3>
+      <pre>pip install -r requirements.txt</pre>
+      {% endif %}
+
+      <p>Once installed, refresh this page.</p>
+    </div>
+  </div>
+</body>
+</html>

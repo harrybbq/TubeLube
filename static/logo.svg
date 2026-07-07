@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none">
+  <!-- Falling drop of "lube" -->
+  <path d="M20 4 L25 14 A5 5 0 0 1 15 14 Z" fill="#c89665"/>
+  <!-- Vinyl record (outer rim) -->
+  <circle cx="20" cy="28" r="10" stroke="#c89665" stroke-width="1.4"/>
+  <!-- Grooves -->
+  <circle cx="20" cy="28" r="6.5" stroke="#c89665" stroke-width="0.6" stroke-opacity="0.5"/>
+  <circle cx="20" cy="28" r="3.5" stroke="#c89665" stroke-width="0.6" stroke-opacity="0.5"/>
+  <!-- Center spindle -->
+  <circle cx="20" cy="28" r="1.4" fill="#c89665"/>
+</svg>
