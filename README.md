@@ -52,13 +52,16 @@ After cloning the repo:
 > Note: your saved playlists (`playset.json`) are also local-only, so a fresh
 > clone starts with an empty library.
 
-## Run
+## Run (in your browser)
 
 ```bash
 python app.py
 ```
 
-The app starts on `http://127.0.0.1:5001` and opens your default browser automatically.
+The app starts on `http://127.0.0.1:5001` and opens your default browser
+automatically — no desktop app needed. On Windows you can just **double-click
+`run_web.bat`** instead of typing the command. Keep the terminal/window open
+while you use it; close it to stop the app.
 
 ## Run as a desktop app
 
