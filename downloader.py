@@ -112,12 +112,22 @@ def _ydl_extract(opts: dict, url: str, download: bool = True) -> dict:
         raise
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(s: str) -> str:
+    """Remove terminal colour codes yt-dlp bakes into some error strings, so
+    they don't show up as raw `[0;31m…` in the UI banner."""
+    return _ANSI_RE.sub("", s)
+
+
 def _friendly_download_error(e: Exception) -> "DownloadError":
-    msg = str(e)
+    msg = _strip_ansi(str(e))
     lower = msg.lower()
     cookie_locked = getattr(e, "_tubelube_cookie_lock", False) or _is_cookie_lock_error(msg)
     bot_gated = ("sign in to confirm" in lower or "confirm you" in lower
                  or "not a bot" in lower)
+    forbidden = "403" in lower and "forbidden" in lower
     if cookie_locked and bot_gated:
         return DownloadError(
             "YouTube wants cookies and your browser is holding them. "
@@ -135,6 +145,12 @@ def _friendly_download_error(e: Exception) -> "DownloadError":
             "YouTube wants authentication for this video. Close your browser "
             "(Chrome / Edge) completely so TubeLube can pass your saved cookies "
             "through, then try again."
+        )
+    if forbidden:
+        return DownloadError(
+            "YouTube refused the download (HTTP 403) even after trying several "
+            "players. This usually means yt-dlp is out of date — update it with:  "
+            "python -m pip install -U --pre \"yt-dlp[default]\"  — then try again."
         )
     return DownloadError(msg)
 
@@ -157,10 +173,18 @@ def _is_format_unavailable(msg: str) -> bool:
             or "no video formats" in m)
 
 
+def _should_broaden_clients(msg: str) -> bool:
+    """Whether a fast-client failure is worth retrying with more clients:
+    no usable formats, or a 403 (the media URL a lean client handed back was
+    rejected — another client often returns a URL that works)."""
+    m = msg.lower()
+    return _is_format_unavailable(msg) or ("403" in m and "forbidden" in m)
+
+
 def _download_with_client_fallback(base_opts: dict, url: str) -> str:
-    """Download trying _CLIENTS_FAST first; on a 'no usable formats' error,
-    retry once with _CLIENTS_FULL. Returns the downloaded file path.
-    `base_opts` must NOT include extractor_args — it's set here per attempt."""
+    """Download trying _CLIENTS_FAST first; on a recoverable failure (no usable
+    formats, or a 403 on the media URL), retry once with _CLIENTS_FULL. Returns
+    the downloaded file path. `base_opts` must NOT include extractor_args."""
     last: Optional[Exception] = None
     for clients in (_CLIENTS_FAST, _CLIENTS_FULL):
         opts = {**base_opts,
@@ -173,7 +197,7 @@ def _download_with_client_fallback(base_opts: dict, url: str) -> str:
                 return ydl.prepare_filename(info)
         except yt_dlp.utils.DownloadError as e:
             last = e
-            if clients is _CLIENTS_FAST and _is_format_unavailable(str(e)):
+            if clients is _CLIENTS_FAST and _should_broaden_clients(str(e)):
                 continue  # broaden the client set and try once more
             raise _friendly_download_error(e) from e
     raise _friendly_download_error(last)
