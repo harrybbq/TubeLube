@@ -155,15 +155,14 @@ def _friendly_download_error(e: Exception) -> "DownloadError":
     return DownloadError(msg)
 
 
-# Player clients to try, fast first. Most videos resolve on the lean pair
-# quickly. Some videos expose no usable streams there — e.g. YouTube's DRM
-# experiment locks the `tv` client's adaptive formats, and `web` formats may
-# need a PO token — so we retry with a broader set. `web_safari` and `mweb`
-# reliably surface the progressive 360p mp4 (itag 18) as a last-resort source
-# with bundled audio, which is enough to play/convert. (web_music is omitted:
-# its formats are PO-token-gated, so it only adds a wasted round trip.)
-_CLIENTS_FAST = ["tv", "web"]
-_CLIENTS_FULL = ["tv", "web_safari", "mweb", "web"]
+# Player clients to try, fast first. `android_vr` leads: it currently returns
+# full-quality adaptive audio without PO tokens and sidesteps the DRM experiment
+# that locks the `tv` client's formats (and the 403s the `web` family hands back).
+# The broader set adds the others as fallbacks: `web_safari`/`mweb` surface the
+# progressive 360p mp4 (itag 18) as a last resort, `tv` for videos where it works.
+# (web_music is omitted — its formats are PO-token-gated, a wasted round trip.)
+_CLIENTS_FAST = ["android_vr", "web"]
+_CLIENTS_FULL = ["android_vr", "tv", "web_safari", "mweb", "web"]
 
 
 def _is_format_unavailable(msg: str) -> bool:
