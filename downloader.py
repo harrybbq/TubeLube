@@ -155,14 +155,14 @@ def _friendly_download_error(e: Exception) -> "DownloadError":
     return DownloadError(msg)
 
 
-# Player clients to try, fast first. `android_vr` leads: it currently returns
-# full-quality adaptive audio without PO tokens and sidesteps the DRM experiment
-# that locks the `tv` client's formats (and the 403s the `web` family hands back).
-# The broader set adds the others as fallbacks: `web_safari`/`mweb` surface the
-# progressive 360p mp4 (itag 18) as a last resort, `tv` for videos where it works.
-# (web_music is omitted — its formats are PO-token-gated, a wasted round trip.)
-_CLIENTS_FAST = ["android_vr", "web"]
-_CLIENTS_FULL = ["android_vr", "tv", "web_safari", "mweb", "web"]
+# Player clients to try for downloading, in order — tried ONE AT A TIME so a
+# 403 (or other recoverable failure) on one client's media URL moves cleanly to
+# the next. This matters because passing several clients at once makes yt-dlp
+# pick the single best format across all of them; if that one URL 403s it never
+# falls through to another client's copy. YouTube keeps shifting which clients
+# hand back downloadable URLs — `android` and `mweb` currently download reliably
+# (full adaptive audio, no PO token); the rest are fallbacks for other videos.
+_CLIENTS = ["android", "mweb", "tv", "web_safari", "web"]
 
 
 def _is_format_unavailable(msg: str) -> bool:
@@ -172,22 +172,25 @@ def _is_format_unavailable(msg: str) -> bool:
             or "no video formats" in m)
 
 
-def _should_broaden_clients(msg: str) -> bool:
-    """Whether a fast-client failure is worth retrying with more clients:
-    no usable formats, or a 403 (the media URL a lean client handed back was
-    rejected — another client often returns a URL that works)."""
+def _should_try_next_client(msg: str) -> bool:
+    """Whether a client's failure is worth retrying with the next client rather
+    than surfacing to the user: a 403 on the media URL, no usable formats, or
+    YouTube's transient 'page needs to be reloaded'."""
     m = msg.lower()
-    return _is_format_unavailable(msg) or ("403" in m and "forbidden" in m)
+    return (("403" in m and "forbidden" in m)
+            or _is_format_unavailable(msg)
+            or "page needs to be reloaded" in m
+            or "the page needs" in m)
 
 
 def _download_with_client_fallback(base_opts: dict, url: str) -> str:
-    """Download trying _CLIENTS_FAST first; on a recoverable failure (no usable
-    formats, or a 403 on the media URL), retry once with _CLIENTS_FULL. Returns
-    the downloaded file path. `base_opts` must NOT include extractor_args."""
+    """Try each client in _CLIENTS on its own until one extracts AND downloads.
+    Returns the downloaded file path. `base_opts` must NOT include
+    extractor_args — it's set per client here."""
     last: Optional[Exception] = None
-    for clients in (_CLIENTS_FAST, _CLIENTS_FULL):
+    for client in _CLIENTS:
         opts = {**base_opts,
-                "extractor_args": {"youtube": {"player_client": clients}}}
+                "extractor_args": {"youtube": {"player_client": [client]}}}
         try:
             info = _ydl_extract(opts, url)
             if info.get("requested_downloads"):
@@ -196,8 +199,8 @@ def _download_with_client_fallback(base_opts: dict, url: str) -> str:
                 return ydl.prepare_filename(info)
         except yt_dlp.utils.DownloadError as e:
             last = e
-            if clients is _CLIENTS_FAST and _should_broaden_clients(str(e)):
-                continue  # broaden the client set and try once more
+            if _should_try_next_client(str(e)):
+                continue  # this client's URL failed — try the next one
             raise _friendly_download_error(e) from e
     raise _friendly_download_error(last)
 

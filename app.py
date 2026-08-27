@@ -434,10 +434,54 @@ def _print_phone_banner() -> None:
     print()
 
 
+_UPDATE_STAMP = Path(tempfile.gettempdir()) / "tubelube_ytdlp_update.txt"
+_UPDATE_INTERVAL = 12 * 3600  # check at most twice a day
+
+
+def _auto_update_ytdlp() -> None:
+    """Keep yt-dlp current so YouTube's frequent changes don't break downloads.
+
+    Runs in the background at startup and installs the latest yt-dlp into the
+    *user* site-packages — the same place the app imports it from, and NO admin
+    rights needed (admin is only required to touch the system Python folder,
+    which we deliberately avoid). Throttled so it doesn't run pip every launch,
+    and effective on the *next* launch (this process keeps the yt-dlp it already
+    imported). Failures are swallowed — a stale yt-dlp still runs, and an update
+    attempt must never block or crash startup.
+
+    Disable with the env var TUBELUBE_NO_AUTOUPDATE=1.
+    """
+    if os.environ.get("TUBELUBE_NO_AUTOUPDATE") or getattr(sys, "frozen", False):
+        return  # frozen .exe bundles yt-dlp; pip doesn't apply there
+    try:
+        import time
+        now = time.time()
+        if _UPDATE_STAMP.exists():
+            try:
+                if now - float(_UPDATE_STAMP.read_text().strip()) < _UPDATE_INTERVAL:
+                    return
+            except ValueError:
+                pass
+        _UPDATE_STAMP.write_text(str(now))
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--user", "--upgrade",
+             "--pre", "yt-dlp[default]"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=240,
+        )
+    except Exception:
+        pass
+
+
 def run_server() -> None:
     """Run the Flask server (no browser). Used by the desktop launcher, which
     supplies its own native window. threaded=True so preview prefetch can run
     alongside the request that's playing."""
+    threading.Thread(target=_auto_update_ytdlp, daemon=True).start()
+    try:
+        import yt_dlp
+        print(f"TubeLube — using yt-dlp {yt_dlp.version.__version__}")
+    except Exception:
+        pass
     app.run(host=APP_HOST, port=APP_PORT, debug=False, use_reloader=False, threaded=True)
 
 

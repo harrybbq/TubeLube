@@ -32,6 +32,11 @@ pip install -r requirements.txt
 
 The app checks for ffmpeg/yt-dlp on launch and shows install instructions if anything is missing.
 
+**yt-dlp auto-updates.** YouTube changes constantly, so on startup TubeLube quietly
+updates yt-dlp in the background (to your user site-packages — no admin needed).
+It's throttled to at most twice a day and takes effect on the next launch. Disable
+by setting the env var `TUBELUBE_NO_AUTOUPDATE=1`.
+
 ### Fresh setup on a new machine (e.g. at work)
 
 After cloning the repo:
