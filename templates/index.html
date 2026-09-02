@@ -716,6 +716,9 @@
   let shuffle = false;
   let playOrder = [];
   let playPos = -1;
+  // Guard against racing through the playlist when loads start failing.
+  let failStreak = 0;
+  const MAX_FAIL_STREAK = 3;
   let nowPlaying = null;     // {title, url, speed, preserve_pitch, format, quality, isFile}
 
   // ── Helpers ───────────────────────────────────────────────────────────
@@ -1084,6 +1087,7 @@
     if (!psongs.length) return;
     closeDrawer();
     qActive = true;
+    failStreak = 0;   // fresh start — user-initiated play clears past failures
     index = Math.max(0, Math.min(index, psongs.length - 1));
     playOrder = buildOrder(index);
     playPos = playOrder.indexOf(index);
@@ -1100,7 +1104,22 @@
     qIndex = songIndex;
     const ok = await playSong(psongs[songIndex]);
     if (qActive && playPos + 1 < playOrder.length) prefetch(psongs[playOrder[playPos + 1]].url);
-    if (!ok && qActive) advanceQueue();
+    if (ok) { failStreak = 0; return; }
+    if (!qActive) return;
+    // A failed song used to advance immediately with no limit — so once fetches
+    // started failing (YouTube rate-limits after a burst of downloads) the queue
+    // raced through the whole playlist in seconds. Stop after a few in a row.
+    failStreak++;
+    if (failStreak >= MAX_FAIL_STREAK) {
+      failStreak = 0;
+      $("previewAudio").pause();
+      stopQueue();
+      showError("Several songs in a row failed to load, so playback stopped instead of "
+              + "skipping through your whole playlist. YouTube rate-limits bursts of "
+              + "downloads — wait a minute, then press play again.");
+      return;
+    }
+    advanceQueue();
   }
   function advanceQueue() {
     if (!qActive) return;

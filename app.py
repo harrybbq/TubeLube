@@ -257,7 +257,10 @@ def _run_job(job: Job, params: dict) -> None:
         local_path = params.get("local_path") or None
         output_format = params["output_format"]
         speed = float(params["speed"])
-        preserve_pitch = bool(params.get("preserve_pitch", True))
+        # Default must match the UI's default (unchecked = pitch follows speed);
+        # this used to default True, silently preserving pitch if the field
+        # were ever missing from the request.
+        preserve_pitch = bool(params.get("preserve_pitch", False))
         output_dir = params["output_dir"]
         quality = params.get("quality", "best" if output_format == "mp4" else "192")
 
@@ -340,6 +343,7 @@ def start_convert():
     if source and not downloader.is_youtube_url(source) and not local_path:
         return jsonify({"error": "That URL doesn't look like a YouTube link."}), 400
 
+    _prune_jobs()
     job = Job(id=uuid.uuid4().hex)
     JOBS[job.id] = job
     t = threading.Thread(target=_run_job, args=(job, data), daemon=True)
@@ -434,6 +438,44 @@ def _print_phone_banner() -> None:
     print()
 
 
+_CACHE_LIMIT_BYTES = 2 * 1024 ** 3   # keep the preview cache under ~2 GB
+
+
+def _prune_preview_cache(limit: int = _CACHE_LIMIT_BYTES) -> None:
+    """Cached preview audio speeds up replays, but nothing ever deleted it, so
+    UPLOAD_DIR grew without bound. Drop the oldest files once past the cap."""
+    try:
+        files = []
+        for p in UPLOAD_DIR.glob("*"):
+            if p.is_file():
+                st = p.stat()
+                files.append((st.st_mtime, st.st_size, p))
+        total = sum(sz for _, sz, _ in files)
+        if total <= limit:
+            return
+        files.sort()  # oldest first
+        for _, size, p in files:
+            if total <= limit:
+                break
+            try:
+                p.unlink()
+                total -= size
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _prune_jobs(keep: int = 20) -> None:
+    """JOBS was never cleaned, so every conversion leaked a record for the life
+    of the process. Drop the oldest finished ones."""
+    excess = len(JOBS) - keep
+    if excess <= 0:
+        return
+    for jid in [k for k, v in JOBS.items() if v.status in ("done", "error")][:excess]:
+        JOBS.pop(jid, None)
+
+
 _UPDATE_STAMP = Path(tempfile.gettempdir()) / "tubelube_ytdlp_update.txt"
 _UPDATE_INTERVAL = 12 * 3600  # check at most twice a day
 
@@ -477,6 +519,7 @@ def run_server() -> None:
     supplies its own native window. threaded=True so preview prefetch can run
     alongside the request that's playing."""
     threading.Thread(target=_auto_update_ytdlp, daemon=True).start()
+    threading.Thread(target=_prune_preview_cache, daemon=True).start()
     try:
         import yt_dlp
         print(f"TubeLube — using yt-dlp {yt_dlp.version.__version__}")

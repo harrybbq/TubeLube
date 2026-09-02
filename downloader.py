@@ -245,19 +245,24 @@ def get_title(url: str) -> str:
     so saving never hard-fails just because the title lookup didn't work."""
     if not is_youtube_url(url):
         raise DownloadError("That doesn't look like a YouTube URL.")
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        # Title is available without solving signature/format challenges, so a
-        # lightweight client list is fine and fast.
-        "extractor_args": {"youtube": {"player_client": ["tv", "web"]}},
-    }
-    try:
-        info = _ydl_extract(opts, url, download=False)
-        return info.get("title") or url
-    except Exception:
-        return url
+    # Try the same clients the downloader uses, in order, until one resolves a
+    # title. Hardcoding a client list here was a bug: when `tv`/`web` broke,
+    # every lookup threw and songs got saved named after their URL.
+    for client in _CLIENTS:
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extractor_args": {"youtube": {"player_client": [client]}},
+        }
+        try:
+            info = _ydl_extract(opts, url, download=False)
+            title = (info or {}).get("title")
+            if title:
+                return title
+        except Exception:
+            continue
+    return url
 
 
 def _hook_factory(on_progress: Optional[Callable[[float, str], None]]):
