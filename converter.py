@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -125,20 +126,61 @@ def _audio_filter(speed: float, preserve_pitch: bool, sample_rate: int) -> str:
     )
 
 
-def _build_output_name(src: str, speed: float, ext: str, out_dir: str) -> str:
-    """Generate e.g. 'mytrack_0.75x.mp3' in out_dir, avoiding collisions."""
+def _build_output_name(src: str, speed: float, ext: str, out_dir: str,
+                       start: Optional[float] = None, end: Optional[float] = None,
+                       loops: int = 1) -> str:
+    """Generate e.g. 'mytrack_0.75x.mp3', or 'mytrack_0.75x_t12-40_x3.mp3' when
+    a section was trimmed and/or repeated. Avoids collisions."""
     stem = Path(src).stem
-    # Trim 1.000 -> 1, 0.750 -> 0.75
-    speed_str = f"{speed:g}"
-    base = f"{stem}_{speed_str}x.{ext}"
+    parts = [stem, f"{speed:g}x"]          # trims 1.000 -> 1, 0.750 -> 0.75
+    if start is not None or end is not None:
+        s = 0.0 if start is None else start
+        parts.append(f"t{s:g}-{end:g}" if end is not None else f"t{s:g}")
+    if loops and loops > 1:
+        parts.append(f"x{int(loops)}")
+    stem_full = "_".join(parts)
     # Strip filesystem-unfriendly chars
-    base = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", base)
-    target = Path(out_dir) / base
+    stem_full = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stem_full)
+    target = Path(out_dir) / f"{stem_full}.{ext}"
     n = 2
     while target.exists():
-        target = Path(out_dir) / f"{stem}_{speed_str}x_{n}.{ext}"
+        target = Path(out_dir) / f"{stem_full}_{n}.{ext}"
         n += 1
     return str(target)
+
+
+def _extract_segment(input_path: str, start: Optional[float], end: Optional[float],
+                     output_format: str) -> str:
+    """Cut [start, end] out to a temp file, re-encoded for frame accuracy.
+
+    Needed because ffmpeg's -stream_loop silently ignores input seeking: asking
+    for a 10s region repeated 3x with `-stream_loop 2 -ss 5 -to 15` yields 10s,
+    not 30s. Cutting first, then looping the cut file, works correctly.
+    """
+    suffix = ".wav" if output_format == "mp3" else ".mkv"
+    fd, tmp = tempfile.mkstemp(suffix=suffix, prefix="tubelube_seg_")
+    os.close(fd)
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    if start is not None:
+        cmd += ["-ss", f"{start:.3f}"]
+    if end is not None:
+        cmd += ["-to", f"{end:.3f}"]
+    cmd += ["-i", input_path]
+    if output_format == "mp3":
+        cmd += ["-vn", "-c:a", "pcm_s16le"]          # lossless intermediate
+    else:
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                "-c:a", "pcm_s16le"]
+    cmd += [tmp]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise ConversionError("Couldn't cut the selected section "
+                              f"(ffmpeg exited {r.returncode}).")
+    return tmp
 
 
 _TIME_RE = re.compile(r"time=(\d+):(\d+):(\d+\.?\d*)")
@@ -166,8 +208,16 @@ def convert(
     output_dir: str,
     audio_bitrate: str = "192k",  # for mp3 / mp4-audio: "192k" or "320k"
     on_progress: Optional[Callable[[float], None]] = None,
+    start: Optional[float] = None,   # trim: section start in source seconds
+    end: Optional[float] = None,     # trim: section end in source seconds
+    loops: int = 1,                  # repeat the (trimmed) section N times
 ) -> str:
-    """Run ffmpeg to produce the sped/slowed file. Returns the output path."""
+    """Run ffmpeg to produce the sped/slowed file. Returns the output path.
+
+    `start`/`end` trim to a section of the source; `loops` repeats that section
+    (1 = play once). Trim positions are in *source* time, matching the preview
+    player's timeline (which reports media time regardless of playback speed).
+    """
     if not (MIN_SPEED <= speed <= MAX_SPEED):
         raise ConversionError(f"Speed must be between {MIN_SPEED} and {MAX_SPEED}.")
     if not os.path.isfile(input_path):
@@ -182,9 +232,42 @@ def convert(
     sr = _probe_sample_rate(input_path)
     duration = _probe_duration(input_path)
     audio_filter = _audio_filter(speed, preserve_pitch, sr)
-    out_path = _build_output_name(input_path, speed, output_format, output_dir)
 
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-i", input_path]
+    # ── Normalise the trim window ──
+    loops = max(1, int(loops or 1))
+    if start is not None or end is not None:
+        s = 0.0 if start is None else max(0.0, float(start))
+        e = float(end) if end is not None else (duration or 0.0)
+        if duration:
+            e = min(e, duration)
+        if e - s < 0.05:
+            raise ConversionError("The selected section is too short — "
+                                  "drag the end handle further from the start.")
+        start, end = s, e
+    section = (end - start) if (start is not None and end is not None) else duration
+
+    out_path = _build_output_name(input_path, speed, output_format, output_dir,
+                                  start, end, loops)
+
+    # ── Choose the source: loops need the section cut out first (see
+    #    _extract_segment for why -stream_loop can't do it in one pass) ──
+    temp_segment: Optional[str] = None
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "info"]
+    if loops > 1:
+        if on_progress:
+            on_progress(0.0)
+        temp_segment = _extract_segment(input_path, start, end, output_format)
+        cmd += ["-stream_loop", str(loops - 1), "-i", temp_segment]
+        total_input_secs = (section or 0.0) * loops
+    else:
+        if start is not None:
+            cmd += ["-ss", f"{start:.3f}"]
+        if end is not None:
+            cmd += ["-to", f"{end:.3f}"]
+        cmd += ["-i", input_path]
+        total_input_secs = section
+    # ffmpeg reports progress in input time, so that's our denominator.
+    duration = total_input_secs
 
     if output_format == "mp3":
         cmd += [
@@ -225,6 +308,11 @@ def convert(
                     on_progress(pct)
     finally:
         ret = proc.wait()
+        if temp_segment:                     # always clean up the cut-out section
+            try:
+                os.unlink(temp_segment)
+            except OSError:
+                pass
     if ret != 0:
         raise ConversionError(f"ffmpeg exited with code {ret}")
     return out_path

@@ -304,6 +304,9 @@ def _run_job(job: Job, params: dict) -> None:
             # pin audio to 320k AAC (transparent, modest size impact next to video).
             audio_bitrate=f"{quality}k" if output_format == "mp3" else "320k",
             on_progress=conv_progress,
+            start=params.get("trim_start"),
+            end=params.get("trim_end"),
+            loops=int(params.get("loops") or 1),
         )
         with job.lock:
             job.status = "done"
@@ -342,6 +345,25 @@ def start_convert():
         return jsonify({"error": "Drop a file or paste a YouTube URL."}), 400
     if source and not downloader.is_youtube_url(source) and not local_path:
         return jsonify({"error": "That URL doesn't look like a YouTube link."}), 400
+
+    # Trim window / repeat count (all optional).
+    ts, te = data.get("trim_start"), data.get("trim_end")
+    try:
+        ts = None if ts in (None, "") else float(ts)
+        te = None if te in (None, "") else float(te)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Trim positions must be numbers."}), 400
+    if ts is not None and ts < 0:
+        return jsonify({"error": "Trim start can't be negative."}), 400
+    if ts is not None and te is not None and te - ts < 0.05:
+        return jsonify({"error": "The selected section is too short."}), 400
+    try:
+        loops = int(data.get("loops") or 1)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Repeat count must be a whole number."}), 400
+    if not (1 <= loops <= 100):
+        return jsonify({"error": "Repeat count must be between 1 and 100."}), 400
+    data["trim_start"], data["trim_end"], data["loops"] = ts, te, loops
 
     _prune_jobs()
     job = Job(id=uuid.uuid4().hex)
