@@ -8,13 +8,29 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import tempfile
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
+# Imported lazily-tolerant: raising here (as before) crashed app.py at import,
+# so the "yt-dlp is missing" install page could never actually be shown.
 try:
     import yt_dlp
-except ImportError as e:
-    raise ImportError("yt-dlp is not installed. Run: pip install -r requirements.txt") from e
+except ImportError:
+    yt_dlp = None
+
+
+def _require_ytdlp() -> None:
+    if yt_dlp is None:
+        raise DownloadError("yt-dlp is not installed. Run: pip install -r requirements.txt")
+
+
+# Options shared by every yt-dlp call. noplaylist matters: a normal "Mix" link
+# (watch?v=X&list=RD…) otherwise downloads the entire playlist, and the result
+# isn't a single file, so conversion failed with "Input file not found".
+_BASE_OPTS = {"noplaylist": True}
 
 
 # Default cookie-DB locations per browser on Windows. The first one that
@@ -86,11 +102,22 @@ def _ydl_extract(opts: dict, url: str, download: bool = True) -> dict:
     without cookies — that might still succeed for un-gated videos. If even
     that fails, surface a friendly error explaining how to fix it.
     """
-    # Manual cookies.txt wins if present — no browser dance, always works.
+    _require_ytdlp()
+    opts = {**_BASE_OPTS, **opts}
+
+    # Manual cookies.txt wins if present. If YouTube still bot-gates us with it,
+    # it has most likely expired — fall through to browser cookies / no cookies
+    # rather than failing outright, and say "re-export" if all of those fail too.
     cookies_file = _find_cookies_file()
+    stale_cookiefile = False
     if cookies_file:
-        with yt_dlp.YoutubeDL({**opts, "cookiefile": str(cookies_file)}) as ydl:
-            return ydl.extract_info(url, download=download)
+        try:
+            return _extract_with_cookiefile(opts, url, download, cookies_file)
+        except yt_dlp.utils.DownloadError as e:
+            if not _is_bot_gate(str(e)):
+                e._tubelube_cookiefile = True  # type: ignore[attr-defined]
+                raise
+            stale_cookiefile = True
 
     saw_cookie_lock = False
     for browser in _candidate_browsers():
@@ -109,7 +136,31 @@ def _ydl_extract(opts: dict, url: str, download: bool = True) -> dict:
         # Annotate so _friendly_download_error can give the right hint.
         if saw_cookie_lock:
             e._tubelube_cookie_lock = True  # type: ignore[attr-defined]
+        if stale_cookiefile:
+            e._tubelube_stale_cookiefile = True  # type: ignore[attr-defined]
         raise
+
+
+def _is_bot_gate(msg: str) -> bool:
+    m = msg.lower()
+    return "sign in to confirm" in m or "not a bot" in m or "confirm you" in m
+
+
+def _extract_with_cookiefile(opts: dict, url: str, download: bool, cookies_file: Path) -> dict:
+    """Run yt-dlp against a private COPY of cookies.txt. yt-dlp writes cookies
+    back to `cookiefile` when it closes, so pointing it at the user's file let a
+    preview and a conversion running together race to rewrite (and corrupt) it."""
+    fd, tmp = tempfile.mkstemp(prefix="tubelube_cookies_", suffix=".txt")
+    os.close(fd)
+    try:
+        shutil.copyfile(cookies_file, tmp)
+        with yt_dlp.YoutubeDL({**opts, "cookiefile": tmp}) as ydl:
+            return ydl.extract_info(url, download=download)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -128,6 +179,13 @@ def _friendly_download_error(e: Exception) -> "DownloadError":
     bot_gated = ("sign in to confirm" in lower or "confirm you" in lower
                  or "not a bot" in lower)
     forbidden = "403" in lower and "forbidden" in lower
+    uses_cookiefile = _find_cookies_file() is not None
+    if bot_gated and (getattr(e, "_tubelube_stale_cookiefile", False) or uses_cookiefile):
+        return DownloadError(
+            "YouTube wants you signed in, and your cookies.txt looks expired. "
+            "Re-export it: open youtube.com signed in, use the 'Get cookies.txt "
+            "LOCALLY' extension, and replace the cookies.txt in the TubeLube folder."
+        )
     if cookie_locked and bot_gated:
         return DownloadError(
             "YouTube wants cookies and your browser is holding them. "
@@ -147,10 +205,13 @@ def _friendly_download_error(e: Exception) -> "DownloadError":
             "through, then try again."
         )
     if forbidden:
+        cookie_tip = (" If that doesn't help, re-export your cookies.txt."
+                      if uses_cookiefile else "")
         return DownloadError(
             "YouTube refused the download (HTTP 403) even after trying several "
             "players. This usually means yt-dlp is out of date — update it with:  "
             "python -m pip install -U --pre \"yt-dlp[default]\"  — then try again."
+            + cookie_tip
         )
     return DownloadError(msg)
 
@@ -245,6 +306,8 @@ def get_title(url: str) -> str:
     so saving never hard-fails just because the title lookup didn't work."""
     if not is_youtube_url(url):
         raise DownloadError("That doesn't look like a YouTube URL.")
+    if yt_dlp is None:
+        return url
     # Try the same clients the downloader uses, in order, until one resolves a
     # title. Hardcoding a client list here was a bug: when `tv`/`web` broke,
     # every lookup threw and songs got saved named after their URL.
@@ -288,6 +351,7 @@ def download(
     on_progress: Optional[Callable[[float, str], None]] = None,
 ) -> str:
     """Download a YouTube URL into work_dir. Returns the resulting file path."""
+    _require_ytdlp()
     if not is_youtube_url(url):
         raise DownloadError("That doesn't look like a YouTube URL.")
     if output_format not in ("mp3", "mp4"):
@@ -338,22 +402,39 @@ def download_audio_preview(
     Skips ffmpeg post-processing — the raw bestaudio stream (typically webm/opus
     or m4a) plays directly in modern browsers, so we save the conversion time.
     """
+    _require_ytdlp()
     if not is_youtube_url(url):
         raise DownloadError("That doesn't look like a YouTube URL.")
     work = Path(work_dir)
     work.mkdir(parents=True, exist_ok=True)
 
-    # Cache hit: if we've already fetched this video's audio, serve it instantly
-    # and skip yt-dlp entirely (the slow part). Huge win for replays and
-    # play-through, where the same songs get loaded repeatedly.
     vid = _extract_video_id(url)
-    if vid:
+    if not vid:
+        return _fetch_preview(url, work, on_progress)
+    # One fetch per video at a time. Pressing play while that same song was
+    # being prefetched used to run two downloads into the same file, which
+    # could corrupt the cache. The second caller now waits, then hits the cache.
+    with _preview_lock(vid):
+        # Cache hit: serve instantly and skip yt-dlp entirely (the slow part).
         cached = _find_cached_preview(work, vid)
         if cached:
             if on_progress:
                 on_progress(100.0, "Cached")
             return str(cached)
+        return _fetch_preview(url, work, on_progress)
 
+
+_preview_locks: dict[str, threading.Lock] = {}
+_preview_locks_guard = threading.Lock()
+
+
+def _preview_lock(video_id: str) -> threading.Lock:
+    with _preview_locks_guard:
+        return _preview_locks.setdefault(video_id, threading.Lock())
+
+
+def _fetch_preview(url: str, work: Path,
+                   on_progress: Optional[Callable[[float, str], None]]) -> str:
     outtmpl = str(work / "preview_%(id)s.%(ext)s")
     opts = {
         "outtmpl": outtmpl,

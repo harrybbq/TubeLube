@@ -16,8 +16,16 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections import deque
 from pathlib import Path
 from typing import Callable, Optional
+
+# Decode every ffmpeg/ffprobe pipe as UTF-8. Without an explicit encoding,
+# Windows uses cp1252, which can't decode some UTF-8 bytes that ffmpeg prints for
+# non-Latin titles (e.g. Japanese "あ" = E3 81 82; 0x81 is undefined in cp1252).
+# The read loop then raised mid-stream, nothing drained the pipe, ffmpeg blocked
+# on a full buffer and the job hung forever on "Converting…".
+_TXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
 
 MIN_SPEED = 0.25
 MAX_SPEED = 4.0
@@ -50,7 +58,7 @@ def _probe_sample_rate(path: str) -> int:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "a:0",
              "-show_entries", "stream=sample_rate", "-of", "json", path],
-            capture_output=True, text=True, check=True,
+            capture_output=True, **_TXT, check=True,
         )
         data = json.loads(out.stdout)
         return int(data["streams"][0]["sample_rate"])
@@ -64,7 +72,7 @@ def _probe_duration(path: str) -> Optional[float]:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "json", path],
-            capture_output=True, text=True, check=True,
+            capture_output=True, **_TXT, check=True,
         )
         return float(json.loads(out.stdout)["format"]["duration"])
     except Exception:
@@ -82,7 +90,7 @@ def _has_rubberband() -> bool:
     try:
         out = subprocess.run(
             ["ffmpeg", "-hide_banner", "-filters"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, **_TXT, check=True,
         )
         _rubberband_cache = " rubberband " in out.stdout
     except Exception:
@@ -141,12 +149,19 @@ def _build_output_name(src: str, speed: float, ext: str, out_dir: str,
     stem_full = "_".join(parts)
     # Strip filesystem-unfriendly chars
     stem_full = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stem_full)
+    # Reserve the name atomically ("x" = create, fail if it exists). A plain
+    # exists() check let two identical jobs (double-click, or phone + desktop)
+    # pick the same name and overwrite each other's output.
     target = Path(out_dir) / f"{stem_full}.{ext}"
     n = 2
-    while target.exists():
-        target = Path(out_dir) / f"{stem_full}_{n}.{ext}"
-        n += 1
-    return str(target)
+    while True:
+        try:
+            with open(target, "x"):
+                pass
+            return str(target)
+        except FileExistsError:
+            target = Path(out_dir) / f"{stem_full}_{n}.{ext}"
+            n += 1
 
 
 def _extract_segment(input_path: str, start: Optional[float], end: Optional[float],
@@ -172,18 +187,21 @@ def _extract_segment(input_path: str, start: Optional[float], end: Optional[floa
         cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                 "-c:a", "pcm_s16le"]
     cmd += [tmp]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, **_TXT)
     if r.returncode != 0:
         try:
             os.unlink(tmp)
         except OSError:
             pass
+        last = (r.stderr or "").strip().splitlines()[-1:] or [""]
         raise ConversionError("Couldn't cut the selected section "
-                              f"(ffmpeg exited {r.returncode}).")
+                              f"(ffmpeg exited {r.returncode}) {last[0]}".rstrip())
     return tmp
 
 
 _TIME_RE = re.compile(r"time=(\d+):(\d+):(\d+\.?\d*)")
+# ffmpeg prefixes log lines with internal context like "[in#0 @ 000002197b8e6fc0]".
+_FF_NOISE = re.compile(r"\[[^\]]*@ [0-9a-fA-Fx]+\]\s*")
 
 
 def _parse_progress(line: str, total_duration: Optional[float]) -> Optional[float]:
@@ -195,8 +213,8 @@ def _parse_progress(line: str, total_duration: Optional[float]) -> Optional[floa
         return None
     h, mi, s = m.groups()
     elapsed = int(h) * 3600 + int(mi) * 60 + float(s)
-    # Output duration shrinks by 1/speed but ffmpeg reports input-time progress
-    # for filter graphs; using total_duration of the source is the right denominator.
+    # `time=` is the OUTPUT timestamp, so total_duration must be the expected
+    # output length (input ÷ speed) — verified: a 30s input at 0.5× reports 60s.
     return max(0.0, min(100.0, (elapsed / total_duration) * 100.0))
 
 
@@ -246,78 +264,110 @@ def convert(
         start, end = s, e
     section = (end - start) if (start is not None and end is not None) else duration
 
+    # Reserves the final name (empty placeholder). ffmpeg writes to a sibling
+    # ".part" file that's renamed over it only on success, so a failed or killed
+    # conversion never leaves a truncated song in the output folder.
     out_path = _build_output_name(input_path, speed, output_format, output_dir,
                                   start, end, loops)
+    final = Path(out_path)
+    part = final.with_name(f"{final.stem}.part{final.suffix}")  # ffmpeg muxes by last extension
 
-    # ── Choose the source: loops need the section cut out first (see
-    #    _extract_segment for why -stream_loop can't do it in one pass) ──
+    def _discard_outputs() -> None:
+        for p in (part, final):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
     temp_segment: Optional[str] = None
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "info"]
-    if loops > 1:
-        if on_progress:
-            on_progress(0.0)
-        temp_segment = _extract_segment(input_path, start, end, output_format)
-        cmd += ["-stream_loop", str(loops - 1), "-i", temp_segment]
-        total_input_secs = (section or 0.0) * loops
-    else:
-        if start is not None:
-            cmd += ["-ss", f"{start:.3f}"]
-        if end is not None:
-            cmd += ["-to", f"{end:.3f}"]
-        cmd += ["-i", input_path]
-        total_input_secs = section
-    # ffmpeg reports progress in input time, so that's our denominator.
-    duration = total_input_secs
-
-    if output_format == "mp3":
-        cmd += [
-            "-vn",
-            "-filter:a", audio_filter,
-            "-c:a", "libmp3lame",
-            "-b:a", audio_bitrate,
-            # libmp3lame compression_level controls encoder effort, NOT bitrate.
-            # 0 = slowest/highest-quality psychoacoustic analysis (still fast in practice).
-            "-compression_level", "0",
-            out_path,
-        ]
-    else:  # mp4
-        # setpts scales the video PTS; 1/speed because PTS divisor speeds it up
-        # when speed > 1. Audio uses the same filter chain so A/V stay aligned.
-        video_filter = f"setpts={1.0/speed:.6f}*PTS"
-        cmd += [
-            "-filter:v", video_filter,
-            "-filter:a", audio_filter,
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-            "-c:a", "aac",
-            "-b:a", audio_bitrate,
-            # twoloop is AAC's higher-quality (slower) coder; the default uses a faster heuristic.
-            "-aac_coder", "twoloop",
-            out_path,
-        ]
-
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        text=True, bufsize=1, universal_newlines=True,
-    )
-    assert proc.stderr is not None
+    proc: Optional[subprocess.Popen] = None
+    tail: deque = deque(maxlen=15)           # last ffmpeg lines, for a useful error
     try:
-        for line in proc.stderr:
+        # ── Choose the source: loops need the section cut out first (see
+        #    _extract_segment for why -stream_loop can't do it in one pass) ──
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "info"]
+        if loops > 1:
             if on_progress:
-                pct = _parse_progress(line, duration)
+                on_progress(0.0)
+            temp_segment = _extract_segment(input_path, start, end, output_format)
+            cmd += ["-stream_loop", str(loops - 1), "-i", temp_segment]
+            total_input_secs = (section or 0.0) * loops
+        else:
+            if start is not None:
+                cmd += ["-ss", f"{start:.3f}"]
+            if end is not None:
+                cmd += ["-to", f"{end:.3f}"]
+            cmd += ["-i", input_path]
+            total_input_secs = section
+        # ffmpeg's progress `time=` is output time, and every speed filter here
+        # (atempo, asetrate, setpts) makes the output input÷speed long.
+        expected_out = (total_input_secs / speed) if total_input_secs else None
+
+        if output_format == "mp3":
+            cmd += [
+                "-vn",
+                "-filter:a", audio_filter,
+                "-c:a", "libmp3lame",
+                "-b:a", audio_bitrate,
+                # libmp3lame compression_level controls encoder effort, NOT bitrate.
+                # 0 = slowest/highest-quality psychoacoustic analysis (still fast in practice).
+                "-compression_level", "0",
+                str(part),
+            ]
+        else:  # mp4
+            # setpts scales the video PTS; 1/speed because PTS divisor speeds it up
+            # when speed > 1. Audio uses the same filter chain so A/V stay aligned.
+            video_filter = f"setpts={1.0/speed:.6f}*PTS"
+            cmd += [
+                "-filter:v", video_filter,
+                "-filter:a", audio_filter,
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                "-c:a", "aac",
+                "-b:a", audio_bitrate,
+                # twoloop is AAC's higher-quality (slower) coder; the default uses a faster heuristic.
+                "-aac_coder", "twoloop",
+                str(part),
+            ]
+
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, bufsize=1, **_TXT,
+        )
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            tail.append(line.rstrip())
+            if on_progress:
+                pct = _parse_progress(line, expected_out)
                 if pct is not None:
                     on_progress(pct)
-    finally:
         ret = proc.wait()
+    except BaseException:
+        # Any unexpected error mid-read must kill ffmpeg first — otherwise it
+        # blocks writing to a pipe nobody drains, and wait() hangs forever.
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        _discard_outputs()
+        raise
+    finally:
         if temp_segment:                     # always clean up the cut-out section
             try:
                 os.unlink(temp_segment)
             except OSError:
                 pass
+
     if ret != 0:
-        raise ConversionError(f"ffmpeg exited with code {ret}")
+        _discard_outputs()
+        # Skip ffmpeg's progress/banner noise; keep the lines that explain failure.
+        detail = []
+        for l in tail:
+            l = _FF_NOISE.sub("", l).replace("�", "").strip()
+            if l and not l.startswith(("frame=", "size=", "Press [q]")):
+                detail.append(l)
+        raise ConversionError("ffmpeg failed: " + " | ".join(detail[-2:]) if detail
+                              else f"ffmpeg failed (exit {ret})")
+    os.replace(part, final)
     return out_path
 
 
 # TODO v2: batch processing — accept a list of (input, speed) pairs.
-# TODO v2: trimming (-ss / -to flags before -i).
 # TODO v2: reverb/effects — chain aecho or use sox.
