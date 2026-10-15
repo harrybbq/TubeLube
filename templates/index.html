@@ -15,8 +15,10 @@
     --panel-edge-bright: rgba(232, 228, 214, 0.22);
     --ink:         #e8e4d6;
     --ink-soft:    rgba(232, 228, 214, 0.72);
-    --ink-mute:    rgba(232, 228, 214, 0.48);
-    --ink-faint:   rgba(232, 228, 214, 0.28);
+    /* Raised for legibility: 0.48 / 0.28 measured ~4.1:1 and ~2.2:1 on the
+       panel ground (labels and hints failed WCAG). Now ~5.1:1 and ~3.7:1. */
+    --ink-mute:    rgba(232, 228, 214, 0.55);
+    --ink-faint:   rgba(232, 228, 214, 0.45);
     --rule:        rgba(232, 228, 214, 0.08);
     --ember:       #c89665;
     --ember-soft:  rgba(200, 150, 101, 0.18);
@@ -97,7 +99,6 @@
   .brand-row .mark { width: 30px; height: 30px; display:grid; place-items:center; border: 1px solid var(--panel-edge-bright); border-radius: 7px; color: var(--ember); }
   .wordmark { font-size: 17px; font-weight: 600; letter-spacing: 0.01em; color: var(--ink); margin: 0; }
   .wordmark .accent { color: var(--ember); }
-  .nav-btns { display: flex; gap: 6px; }
   .icon-btn {
     width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
     border: 1px solid transparent; background: rgba(0,0,0,0.25); color: var(--ink-soft); cursor: pointer;
@@ -179,7 +180,7 @@
     flex-shrink:0; border:0; background:transparent; color: var(--ink-faint); font-size: 16px; line-height:1;
     width: 22px; height: 22px; border-radius: 5px; cursor: pointer; opacity: 0; transition: opacity .15s, color .15s, background .15s;
   }
-  .lib-item:hover .lib-remove { opacity: 1; }
+  .lib-item:hover .lib-remove, .lib-item:focus-within .lib-remove { opacity: 1; }
   .lib-remove:hover { color: var(--error-ink); background: rgba(180,60,60,0.14); }
 
   /* — Main panel ————————————————————————————————————————— */
@@ -223,11 +224,13 @@
 
   .source-box { border: 1px solid var(--panel-edge); border-radius: 8px; background: rgba(0,0,0,0.22); padding: 16px 18px; display:flex; flex-direction: column; align-items: center; gap: 8px; transition: border-color .2s ease, background .2s ease; }
   .source-box:hover { border-color: var(--panel-edge-bright); }
+  .source-box:focus-within { border-color: var(--ember-line); }
   .source-box.drag { border-color: var(--ember-line); background: rgba(200,150,101,0.06); }
   .source-input { width: 100%; background: transparent; border: 0; outline: none; color: var(--ink); font-family: var(--font-mono); font-size: 13px; text-align: center; }
   .source-input::placeholder { color: var(--ink-faint); }
   .source-or { font-size: 12px; color: var(--ink-mute); }
-  .source-or a { color: var(--ember); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ember-line); cursor: pointer; }
+  .source-or a, .source-or .linklike { color: var(--ember); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ember-line); cursor: pointer; }
+  .linklike { appearance: none; background: none; border: 0; padding: 0; font: inherit; }
   .source-picked { font-family: var(--font-mono); font-size: 12px; color: var(--ember); word-break: break-all; text-align:center; }
   .preview-bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 
@@ -299,7 +302,12 @@
   .save-new input:focus { border-color: var(--ember-line); }
 
   /* — Trim & Loop stage (the centerpiece) ————————————————— */
-  .trim-stage { flex: 0 0 42%; display: flex; flex-direction: column; justify-content: center; gap: 20px; padding: 24px 28px; border-left: 1px solid var(--rule); }
+  /* Safe centering: auto margins centre the content when there's room, but let it
+     scroll from the top on short windows (justify-content:center clipped both
+     ends, with no way to reach them). */
+  .trim-stage { flex: 0 0 42%; display: flex; flex-direction: column; gap: 20px; padding: 24px 28px; border-left: 1px solid var(--rule); overflow-y: auto; }
+  .trim-stage > :first-child { margin-top: auto; }
+  .trim-stage > :last-child { margin-bottom: auto; }
   .trim-stage.idle { opacity: .55; pointer-events: none; }
   .trim-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-mute); }
 
@@ -415,7 +423,28 @@
     .app { grid-template-columns: 240px minmax(0,1fr); grid-template-areas: "topbar topbar" "sidebar main" "player player"; }
     .right { display: none; }
   }
-  @media (max-width: 1040px) { .trim-stage { display:none; } .main-body { max-width:none; } }
+  /* Narrow windows (incl. phones): stack Trim & Loop under the form instead of
+     hiding it — it used to vanish while its values still applied to exports. */
+  @media (max-width: 1040px) {
+    .main { flex-direction: column; overflow-y: auto; }
+    .main-scroll { flex: none; overflow: visible; }
+    .trim-stage { flex: none; overflow: visible; border-left: 0; border-top: 1px solid var(--rule); }
+    .main-body { max-width: none; }
+  }
+
+  /* Visible keyboard focus everywhere (there was none: many inputs set
+     outline:none and nothing replaced it). Text fields inside framed boxes
+     show focus on the box instead (.source-box / .searchbar :focus-within). */
+  button:focus-visible, a:focus-visible, select:focus-visible,
+  [tabindex]:focus-visible, [role="slider"]:focus-visible,
+  .path-input:focus-visible, .speed-meta input:focus-visible,
+  .save-new input:focus-visible, .rep-ctl input:focus-visible,
+  .range-track input[type=range]:focus-visible {
+    outline: 2px solid var(--ember); outline-offset: 2px;
+  }
+  /* Custom checkboxes: the real input is hidden, so ring the drawn box. */
+  .pitch-row input:focus-visible + .pitch-box,
+  .trim-check input:focus-visible + .pitch-box { outline: 2px solid var(--ember); outline-offset: 2px; }
   @media (max-width: 820px) {
     .app { grid-template-columns: minmax(0,1fr); grid-template-areas: "topbar" "main" "player"; }
     /* Sidebar becomes a slide-in drawer, opened from the topbar library button. */
@@ -436,7 +465,7 @@
   @media (max-width: 600px) {
     .app { grid-template-rows: 52px minmax(0,1fr) 92px; }
     .topbar { grid-template-columns: 1fr auto; padding: 0 12px; }
-    .nav-btns, .top-center, .win-dots { display: none; }
+    .top-center, .win-dots { display: none; }
     .sidebar { top: calc(52px + var(--shell-gap) * 2); bottom: calc(92px + var(--shell-gap) * 2); }
     .main-hero { padding: 22px 18px 14px; gap: 16px; }
     .hero-cover { width: 84px; height: 84px; }
@@ -503,14 +532,10 @@
         </div>
         <h1 class="wordmark">Tube<span class="accent">·Lube</span></h1>
       </div>
-      <div class="nav-btns">
-        <button class="icon-btn" title="Back"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3 L5 8 L10 13"/></svg></button>
-        <button class="icon-btn" title="Forward"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3 L11 8 L6 13"/></svg></button>
-      </div>
       <button class="icon-btn lib-toggle" id="libToggle" title="Your library"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4 H14 M2 8 H14 M2 12 H10"/></svg></button>
     </div>
     <div class="top-center">
-      <button class="home-btn" title="Home"><svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8 L9 3 L15 8 V15 H3 Z"/></svg></button>
+      <button class="home-btn" id="homeBtn" title="Back to the converter" aria-label="Back to the converter"><svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8 L9 3 L15 8 V15 H3 Z"/></svg></button>
       <div class="searchbar">
         <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M11 11 L14 14"/></svg>
         <input id="searchInput" type="text" placeholder="Paste a link or search your conversions…" autocomplete="off">
@@ -580,7 +605,7 @@
           <div class="label">Source</div>
           <div id="drop" class="source-box">
             <input id="urlInput" class="source-input" type="text" placeholder="Paste a YouTube URL or drop a file here" autocomplete="off">
-            <div class="source-or">…or <a id="pickFile">choose a file</a></div>
+            <div class="source-or">…or <button type="button" class="linklike" id="pickFile">choose a file</button></div>
             <div id="picked" class="source-picked" style="display:none"></div>
             <input id="fileInput" type="file" accept=".mp3,.mp4,.m4a,.wav,.webm,.mkv,.mov" hidden>
           </div>
@@ -645,7 +670,7 @@
           <div class="progress-meta" id="statusLine">Starting…</div>
         </div>
 
-        <div class="error" id="error"></div>
+        <div class="error" id="error" role="alert"></div>
       </div>
     </div>
 
@@ -750,13 +775,13 @@
       </div>
       <div class="scrub-line">
         <span class="tt" id="curTime">0:00</span>
-        <div class="scrub" id="scrub"><div class="scrub-track"></div><div class="scrub-fill" id="scrubFill"></div><div class="scrub-thumb" id="scrubThumb"></div></div>
+        <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="scrub-track"></div><div class="scrub-fill" id="scrubFill"></div><div class="scrub-thumb" id="scrubThumb"></div></div>
         <span class="tt" id="totTime">0:00</span>
       </div>
     </div>
     <div class="player-right">
       <span style="color:var(--ink-mute)"><svg viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 7 H6 L10 4 V14 L6 11 H3 Z M12 6 Q14 9 12 12 M14 4 Q17.5 9 14 14"/></svg></span>
-      <div class="vol"><div class="vtrack" id="volTrack"><div class="vfill" id="volFill"></div></div></div>
+      <div class="vol"><div class="vtrack" id="volTrack" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><div class="vfill" id="volFill"></div></div></div>
     </div>
   </div>
 
@@ -765,7 +790,7 @@
 
 <div class="drawer-scrim" id="drawerScrim"></div>
 
-<div class="toast" id="toast"><span class="glyph" id="toastGlyph">Done</span><span id="toastText"></span><button class="btn" id="toastAction" style="display:none">Open folder</button></div>
+<div class="toast" id="toast" role="status" aria-live="polite"><span class="glyph" id="toastGlyph">Done</span><span id="toastText"></span><button class="btn" id="toastAction" style="display:none">Open folder</button></div>
 
 <audio id="previewAudio" preload="metadata"></audio>
 
@@ -798,6 +823,8 @@
   // Guard against racing through the playlist when loads start failing.
   let failStreak = 0;
   const MAX_FAIL_STREAK = 3;
+  // Bumped by every new load; an async load only applies if it's still the latest.
+  let playToken = 0;
   let nowPlaying = null;     // {title, url, speed, preserve_pitch, format, quality, isFile}
 
   // ── Helpers ───────────────────────────────────────────────────────────
@@ -815,14 +842,25 @@
   // and audio.duration are in source seconds and ignore playbackRate, so at 0.85×
   // a 3:41 track would wrongly read 3:41 when it really takes 4:20 to play.
   // (The trim panel deliberately stays in source seconds — that's what ffmpeg cuts.)
+  // The speed field holds whatever was typed ("5", "", "0.1"). Everything reads
+  // it through this clamp so playback, the summary, saved songs and /convert all
+  // agree with the big readout (typing 5 used to play at 5× while showing 4.00).
+  function curSpeed() {
+    const raw = $("speedNum").value.trim();
+    const v = raw === "" ? NaN : Number(raw);
+    return isFinite(v) ? Math.min(4.0, Math.max(0.25, v)) : 1.0;
+  }
   function effectiveRate() {
     const a = $("previewAudio");
-    return (a.src && a.playbackRate) || parseFloat($("speedNum").value) || 1;
+    return (a.src && a.playbackRate) || curSpeed() || 1;
   }
   function updateTimes() {
     const a = $("previewAudio"), rate = effectiveRate();
     $("curTime").textContent = fmtTime(a.currentTime / rate);
     $("totTime").textContent = fmtTime(a.duration / rate);   // NaN before metadata → "0:00"
+    const sc = $("scrub");
+    sc.setAttribute("aria-valuenow", a.duration ? Math.round(a.currentTime / a.duration * 100) : 0);
+    sc.setAttribute("aria-valuetext", `${fmtTime(a.currentTime / rate)} of ${fmtTime(a.duration / rate)}`);
   }
 
   // ── Toast / error ─────────────────────────────────────────────────────
@@ -892,6 +930,9 @@
   }
   $("speedSlider").addEventListener("input", e => setSpeed(e.target.value, "slider"));
   $("speedNum").addEventListener("input", e => setSpeed(e.target.value, "num"));
+  // On commit (blur/Enter), write the clamped value back into the field. Not on
+  // "input" — that would fight the user mid-typing (e.g. "0." → snapping to 1).
+  $("speedNum").addEventListener("change", () => setSpeed($("speedNum").value));
 
   function syncPitch() {
     $("pitchRow").classList.toggle("on", $("preservePitch").checked);
@@ -906,14 +947,14 @@
   function applyPreviewSettings() {
     const a = $("previewAudio");
     if (!a.src) return;
-    a.playbackRate = parseFloat($("speedNum").value) || 1.0;
+    a.playbackRate = curSpeed() || 1.0;
     a.preservesPitch = $("preservePitch").checked;
   }
 
   // ── Output details / summary / now-playing surfaces ───────────────────
   function pitchShort() { return $("preservePitch").checked ? "pitch preserved" : "pitch follows"; }
   function updateOutputDetails() {
-    const spd = $("speedNum").value;
+    const spd = curSpeed();
     $("actionSummary").textContent = `${state.format.toUpperCase()} · ${qualityLabel()} · ${fmtSpeed(spd)} · ${pitchShort()}`;
     $("odFormat").textContent = state.format.toUpperCase();
     $("odQuality").textContent = qualityLabel();
@@ -927,7 +968,7 @@
     const np = nowPlaying;
     const title = np ? (np.title || np.url) : "Nothing playing";
     const thumb = np ? thumbFor(np.url) : null;
-    const sub = np ? `${(np.format||state.format).toUpperCase()} · ${fmtSpeed(np.speed ?? $("speedNum").value)}` : "";
+    const sub = np ? `${(np.format||state.format).toUpperCase()} · ${fmtSpeed(np.speed ?? curSpeed())}` : "";
 
     // Vinyl
     $("trimStage").classList.toggle("idle", !np);
@@ -940,7 +981,7 @@
     $("npTitle").textContent = np ? title : "—";
     $("npSub").innerHTML = "";
     if (np) {
-      const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = fmtSpeed(np.speed ?? $("speedNum").value);
+      const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = fmtSpeed(np.speed ?? curSpeed());
       const txt = document.createTextNode(" " + (np.format||state.format).toUpperCase());
       $("npSub").appendChild(tag); $("npSub").appendChild(txt);
     } else { $("npSub").textContent = "Nothing playing"; }
@@ -960,6 +1001,10 @@
   function setPreviewPill(on, text) {
     $("previewPill").classList.toggle("on", !!on);
     $("previewPillText").textContent = text;
+    // The pill lives in the right panel, which is hidden below 1180px — so mirror
+    // loading/failure into the always-visible player bar too.
+    if (/Loading|Failed/.test(text)) $("npSub").textContent = text;
+    else renderNowPlaying();
   }
 
   // ── Source input / drop / upload ──────────────────────────────────────
@@ -988,17 +1033,21 @@
   });
 
   async function uploadFile(f) {
-    showError(""); resetPreview();
+    // stopQueue: otherwise a running play-through advanced when the file's
+    // preview ended and silently replaced the user's file with the next song.
+    showError(""); stopQueue(); resetPreview();
+    const my = playToken;
     $("picked").style.display = "block"; $("picked").textContent = `Uploading ${f.name}…`;
     $("urlInput").value = ""; $("previewActions").style.display = "none";
     const form = new FormData(); form.append("file", f);
     try {
       const r = await fetch("/upload", { method: "POST", body: form });
       const data = await r.json();
+      if (my !== playToken) return;   // something else was loaded meanwhile
       if (!r.ok) throw new Error(data.error || "Upload failed.");
       state.localPath = data.path; state.localName = data.name;
       $("picked").textContent = data.name;
-      nowPlaying = { title: data.name, url: null, speed: parseFloat($("speedNum").value), preserve_pitch: $("preservePitch").checked, format: state.format, quality: state.quality, isFile: true };
+      nowPlaying = { title: data.name, url: null, speed: curSpeed(), preserve_pitch: $("preservePitch").checked, format: state.format, quality: state.quality, isFile: true };
       renderNowPlaying();
       setPreviewSource(data.preview_url);
       setPreviewPill(true, "Preview loaded — reflects your settings live");
@@ -1018,6 +1067,8 @@
     a.addEventListener("loadedmetadata", () => { applyPreviewSettings(); updateTimes(); if (autoplay) a.play().catch(()=>{}); }, { once: true });
   }
   function resetPreview() {
+    ++playToken;     // discard any load still in flight
+    resetTrim(0);    // a trim/repeat set on the old source must not reach the next export
     const a = $("previewAudio"); a.pause(); a.removeAttribute("src"); a.load();
     setPreviewPill(false, "Preview idle");
     $("scrubFill").style.width = "0%"; $("scrubThumb").style.left = "0%";
@@ -1036,11 +1087,13 @@
     const url = $("urlInput").value.trim();
     if (!looksLikeYouTube(url)) return;
     stopQueue(); showError("");
+    const my = ++playToken;
     const btn = $("loadPreviewBtn"); const orig = btn.textContent;
     btn.disabled = true; btn.textContent = "Fetching…";
     try {
       const pv = await fetchPreview(url);
-      nowPlaying = { title: "Preview", url, speed: parseFloat($("speedNum").value), preserve_pitch: $("preservePitch").checked, format: state.format, quality: state.quality };
+      if (my !== playToken) return;   // superseded by a newer load
+      nowPlaying = { title: "Preview", url, speed: curSpeed(), preserve_pitch: $("preservePitch").checked, format: state.format, quality: state.quality };
       renderNowPlaying();
       setPreviewSource(pv, true);
       setPreviewPill(true, "Preview loaded — reflects your settings live");
@@ -1089,9 +1142,21 @@
       meta.appendChild(t); meta.appendChild(sub);
 
       const rm = document.createElement("button"); rm.className = "lib-remove"; rm.textContent = "×"; rm.title = "Remove";
+      rm.setAttribute("aria-label", `Remove ${s.title || s.url}`);
       rm.addEventListener("click", (e) => { e.stopPropagation(); removeSong(s.id); });
 
       item.addEventListener("click", () => startQueueAt(idx));
+      // Keyboard: Enter/Space plays from here, Alt+↑/↓ reorders (drag is mouse-only).
+      item.tabIndex = 0;
+      item.setAttribute("role", "button");
+      item.setAttribute("aria-label", `Play ${s.title || s.url}`);
+      item.addEventListener("keydown", (e) => {
+        if (e.target !== item) return;
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); startQueueAt(idx); }
+        else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+          e.preventDefault(); moveSong(s.id, e.key === "ArrowUp" ? -1 : 1);
+        }
+      });
       // drag reorder
       item.addEventListener("dragstart", (e) => { dragId = s.id; item.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
       item.addEventListener("dragend", () => { dragId = null; document.querySelectorAll(".lib-item").forEach(r => r.classList.remove("dragging","drop-before","drop-after")); });
@@ -1198,6 +1263,7 @@
     const songIndex = playOrder[playPos];
     qIndex = songIndex;
     const ok = await playSong(psongs[songIndex]);
+    if (ok === null) return;   // superseded by a newer load — not a failure
     if (qActive && playPos + 1 < playOrder.length) prefetch(psongs[playOrder[playPos + 1]].url);
     if (ok) { failStreak = 0; return; }
     if (!qActive) return;
@@ -1242,12 +1308,20 @@
     nowPlaying = { title: s.title || s.url, url: s.url, speed: s.speed, preserve_pitch: s.preserve_pitch, format: s.format, quality: s.quality };
     renderNowPlaying(); renderLibrary();
     setPreviewPill(true, "Loading…");
+    // Requests can finish out of order: click a slow song, then a cached one, and
+    // the slow reply used to replace the audio while the UI showed the other song
+    // (and a stale failure could count toward the skip limit). Only the latest wins.
+    const my = ++playToken;
     try {
       const pv = await fetchPreview(s.url);
+      if (my !== playToken) return null;
       setPreviewSource(pv, true);
       setPreviewPill(true, "Now playing");
       return true;
-    } catch (err) { showError(err.message); setPreviewPill(false, "Failed to load"); return false; }
+    } catch (err) {
+      if (my !== playToken) return null;
+      showError(err.message); setPreviewPill(false, "Failed to load"); return false;
+    }
   }
 
   async function removeSong(id) {
@@ -1260,6 +1334,15 @@
       const r = await fetch(`/playlists/${activePid}/reorder`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({order: orderIds}) });
       const data = await r.json(); if (r.ok) { psongs = data.songs; resyncOrder(); renderLibrary(); }
     } catch (_) {}
+  }
+  // Keyboard reorder (Alt+↑/↓ on a library row), keeping focus on the moved song.
+  async function moveSong(id, delta) {
+    const ids = psongs.map(s => s.id), i = ids.indexOf(id), j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    await saveOrder(ids);
+    const el = document.querySelector(`.lib-item[data-id="${id}"]`);
+    if (el) el.focus();
   }
   function dropReorder(targetId, before) {
     if (!dragId || dragId === targetId) return;
@@ -1334,6 +1417,14 @@
     $("scrub").addEventListener("pointermove", (e) => { if (seeking) seekFromEvent(e); });
     $("scrub").addEventListener("pointerup", () => { seeking = false; });
     $("scrub").addEventListener("pointercancel", () => { seeking = false; });
+    // Keyboard seeking (was pointer-only): ←/→ 5s, Home/End jump.
+    $("scrub").addEventListener("keydown", (e) => {
+      if (!a.duration) return;
+      const step = { ArrowLeft: -5, ArrowDown: -5, ArrowRight: 5, ArrowUp: 5 }[e.key];
+      if (step !== undefined) { e.preventDefault(); a.currentTime = Math.min(a.duration, Math.max(0, a.currentTime + step)); }
+      else if (e.key === "Home") { e.preventDefault(); a.currentTime = 0; }
+      else if (e.key === "End") { e.preventDefault(); a.currentTime = Math.max(0, a.duration - 0.5); }
+    });
   })();
 
   // ── Trim & Loop ───────────────────────────────────────────────────────
@@ -1347,6 +1438,11 @@
   function resetTrim(dur) {
     trackDur = isFinite(dur) && dur > 0 ? dur : 0;
     trimStart = 0; trimEnd = trackDur;
+    // Repeat count and loop are per-song as well — they used to carry over into
+    // every later conversion.
+    $("repCount").value = 1;
+    $("loopSection").checked = false;
+    $("loopRow").classList.remove("on");
     renderTrim();
   }
   function renderTrim() {
@@ -1363,7 +1459,7 @@
     const section = Math.max(0, trimEnd - trimStart);
     $("ttLen").textContent = fmtTime(section);
     // Output length = section ÷ speed × repeats.
-    const spd = parseFloat($("speedNum").value) || 1;
+    const spd = curSpeed() || 1;
     const reps = Math.max(1, parseInt($("repCount").value, 10) || 1);
     $("trimOut").textContent = section > 0 ? "output " + fmtTime(section / spd * reps) : "—";
   }
@@ -1389,10 +1485,14 @@
     trimStart = Math.max(0, trimStart); trimEnd = Math.min(trackDur, trimEnd);
     renderTrim();
   });
+  // pointerup clears dragHandle *before* the click that follows it fires, so the
+  // old `if (dragHandle)` guard never caught it and every handle drag ended with
+  // a seek to the release point. Remember when a drag ended instead.
+  let dragEndedAt = 0;
   ["pointerup", "pointercancel"].forEach(ev =>
-    $("tlTrack").addEventListener(ev, () => { dragHandle = null; }));
+    $("tlTrack").addEventListener(ev, () => { if (dragHandle) dragEndedAt = performance.now(); dragHandle = null; }));
   $("tlTrack").addEventListener("click", (e) => {
-    if (dragHandle || !trackDur) return;
+    if (dragHandle || !trackDur || performance.now() - dragEndedAt < 350) return;
     const a = $("previewAudio");
     if (a.src) a.currentTime = trimSeconds(e.clientX);
   });
@@ -1430,7 +1530,13 @@
       if (trimIsFull()) return;
       if (a.currentTime >= trimEnd - 0.03) {
         if ($("loopSection").checked) { a.currentTime = trimStart; a.play().catch(()=>{}); }
-        else a.pause();
+        else {
+          // Pause first (so further timeupdates can't re-fire this), then hand
+          // off to the queue: a pause never fires `ended`, so a play-through
+          // used to stall here for good.
+          a.pause();
+          if (qActive) advanceQueue();
+        }
       } else if (a.currentTime < trimStart - 0.5) {
         a.currentTime = trimStart;   // jumped before the section — snap into it
       }
@@ -1446,7 +1552,14 @@
   // ── Volume (default 50%) ──────────────────────────────────────────────
   (function wireVolume() {
     const a = $("previewAudio"), track = $("volTrack"), fill = $("volFill");
-    function apply(p) { p = Math.min(1, Math.max(0, p)); a.volume = p; fill.style.width = (p*100) + "%"; }
+    function apply(p) { p = Math.min(1, Math.max(0, p)); a.volume = p; fill.style.width = (p*100) + "%"; track.setAttribute("aria-valuenow", Math.round(p*100)); }
+    // Keyboard volume (was pointer-only): arrows ±5%, Home/End mute/max.
+    track.addEventListener("keydown", (e) => {
+      const step = { ArrowLeft: -0.05, ArrowDown: -0.05, ArrowRight: 0.05, ArrowUp: 0.05 }[e.key];
+      if (step !== undefined) { e.preventDefault(); apply(a.volume + step); }
+      else if (e.key === "Home") { e.preventDefault(); apply(0); }
+      else if (e.key === "End") { e.preventDefault(); apply(1); }
+    });
     apply(0.5);
     let dragging = false;
     function fromEvent(e) { const r = track.getBoundingClientRect(); apply((e.clientX - r.left)/r.width); }
@@ -1487,7 +1600,7 @@
   });
   document.addEventListener("click", (e) => { if (!saveMenu.contains(e.target) && e.target !== $("savePlaylistBtn")) closeSaveMenu(); });
   function currentSaveBody() {
-    return { url: $("urlInput").value.trim(), output_format: state.format, quality: state.quality, speed: parseFloat($("speedNum").value), preserve_pitch: $("preservePitch").checked };
+    return { url: $("urlInput").value.trim(), output_format: state.format, quality: state.quality, speed: curSpeed(), preserve_pitch: $("preservePitch").checked };
   }
   async function saveInto(pid) {
     closeSaveMenu();
@@ -1522,7 +1635,7 @@
     const url = $("urlInput").value.trim();
     if (!url && !state.localPath) { showError("Drop a file or paste a YouTube URL."); return; }
     if (!$("outDir").value.trim()) { showError("Choose an output folder."); return; }
-    const body = { source: url, local_path: state.localPath || "", output_format: state.format, quality: state.quality, speed: parseFloat($("speedNum").value), preserve_pitch: $("preservePitch").checked, output_dir: $("outDir").value.trim() };
+    const body = { source: url, local_path: state.localPath || "", output_format: state.format, quality: state.quality, speed: curSpeed(), preserve_pitch: $("preservePitch").checked, output_dir: $("outDir").value.trim() };
     // Only send a trim window when the user actually narrowed it.
     if (!trimIsFull()) { body.trim_start = trimStart; body.trim_end = trimEnd; }
     const reps = Math.max(1, parseInt($("repCount").value, 10) || 1);
@@ -1583,6 +1696,21 @@
   }
 
   // ── Init ──────────────────────────────────────────────────────────────
+  // ── Keyboard: Space toggles playback, except where Space already means
+  //    something (typing, buttons, sliders, library rows).
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== " " || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest && e.target.closest("input, textarea, select, button, [contenteditable], [role=button], [role=slider]")) return;
+    e.preventDefault();
+    $("tbPlay").click();
+  });
+  // Home: back to the top of the converter, ready to paste a link.
+  $("homeBtn").addEventListener("click", () => {
+    const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.querySelector(".main-scroll").scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+    $("urlInput").focus({ preventScroll: true });
+  });
+
   setSpeed(1.0); syncPitch(); updateOutputDetails(); renderNowPlaying();
   refreshPlayset();
 </script>
