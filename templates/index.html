@@ -811,6 +811,20 @@
   function looksLikeYouTube(s) { return /^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be)\//i.test((s || "").trim()); }
   function fmtTime(t) { if (!isFinite(t)) return "0:00"; t = Math.max(0, Math.floor(t)); const m = Math.floor(t/60), s = t%60; return m + ":" + String(s).padStart(2,"0"); }
 
+  // The player-bar clock shows *listening* time, not media time. audio.currentTime
+  // and audio.duration are in source seconds and ignore playbackRate, so at 0.85×
+  // a 3:41 track would wrongly read 3:41 when it really takes 4:20 to play.
+  // (The trim panel deliberately stays in source seconds — that's what ffmpeg cuts.)
+  function effectiveRate() {
+    const a = $("previewAudio");
+    return (a.src && a.playbackRate) || parseFloat($("speedNum").value) || 1;
+  }
+  function updateTimes() {
+    const a = $("previewAudio"), rate = effectiveRate();
+    $("curTime").textContent = fmtTime(a.currentTime / rate);
+    $("totTime").textContent = fmtTime(a.duration / rate);   // NaN before metadata → "0:00"
+  }
+
   // ── Toast / error ─────────────────────────────────────────────────────
   let toastTimer = null;
   function toast(text, { glyph = "Done", action = null } = {}) {
@@ -872,6 +886,7 @@
     $("speedSlider").style.setProperty("--pct", ((v - 0.25) / 3.75 * 100) + "%");
     $("speedTag").textContent = tempoOf(v);
     applyPreviewSettings();
+    updateTimes();         // paused speed changes fire no timeupdate — refresh the clock now
     updateOutputDetails();
     renderTrim();          // output-length estimate depends on speed
   }
@@ -1000,7 +1015,7 @@
   function setPreviewSource(url, autoplay) {
     const a = $("previewAudio");
     a.src = url;
-    a.addEventListener("loadedmetadata", () => { applyPreviewSettings(); $("totTime").textContent = fmtTime(a.duration); if (autoplay) a.play().catch(()=>{}); }, { once: true });
+    a.addEventListener("loadedmetadata", () => { applyPreviewSettings(); updateTimes(); if (autoplay) a.play().catch(()=>{}); }, { once: true });
   }
   function resetPreview() {
     const a = $("previewAudio"); a.pause(); a.removeAttribute("src"); a.load();
@@ -1310,8 +1325,7 @@
     a.addEventListener("timeupdate", () => {
       const pct = a.duration ? (a.currentTime / a.duration * 100) : 0;
       $("scrubFill").style.width = pct + "%"; $("scrubThumb").style.left = pct + "%";
-      $("curTime").textContent = fmtTime(a.currentTime);
-      if (a.duration) $("totTime").textContent = fmtTime(a.duration);
+      updateTimes();
     });
     // seek (pointer events so touch dragging works on phones)
     function seekFromEvent(e) { const r = $("scrub").getBoundingClientRect(); const p = Math.min(1, Math.max(0, (e.clientX - r.left)/r.width)); if (a.duration) a.currentTime = p * a.duration; }
