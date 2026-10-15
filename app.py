@@ -16,6 +16,8 @@ your Wi-Fi (e.g. your phone) — it prints the address and a QR code to scan.
 from __future__ import annotations
 
 import argparse
+import ipaddress
+import math
 import os
 import shutil
 import socket
@@ -28,6 +30,7 @@ import webbrowser
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from flask import Flask, jsonify, render_template, request, send_file, send_from_directory
 
@@ -65,6 +68,15 @@ class Job:
 
 
 JOBS: dict[str, Job] = {}
+# Guards JOBS itself (each Job has its own lock for its fields). Without it,
+# pruning iterated the dict while another request inserted into it, which can
+# raise "dictionary changed size during iteration" and 500 the request.
+_JOBS_LOCK = threading.Lock()
+
+
+def _get_job(job_id: str) -> Optional[Job]:
+    with _JOBS_LOCK:
+        return JOBS.get(job_id)
 
 
 def _check_dependencies() -> list[str]:
@@ -82,6 +94,64 @@ def _check_dependencies() -> list[str]:
 def _request_is_local() -> bool:
     """True when the request comes from this machine (not a phone/LAN device)."""
     return request.remote_addr in ("127.0.0.1", "::1")
+
+
+# ── Request hardening ─────────────────────────────────────────────────────
+# Two holes this closes:
+#  1. Any website open in the user's browser could POST to 127.0.0.1:5001 —
+#     get_json(force=True) accepted text/plain bodies, which browsers send
+#     cross-site without a CORS check. The browser always sends an Origin
+#     header on such requests, so reject one that isn't this app.
+#  2. DNS rebinding: an attacker's domain re-pointed at 127.0.0.1 makes requests
+#     look same-origin. Their Host header still carries the attacker's domain,
+#     so only accept Hosts that are an IP address or "localhost".
+def _host_ok(host: str) -> bool:
+    name = host[1:host.find("]")] if host.startswith("[") else host.rsplit(":", 1)[0]
+    if name == "localhost":
+        return True
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return False
+
+
+@app.before_request
+def _guard_request():
+    if not _host_ok(request.host or ""):
+        return jsonify({"error": "Requests must be addressed to this computer's IP or localhost."}), 403
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        origin = request.headers.get("Origin")
+        if origin and urlparse(origin).netloc != request.host:
+            return jsonify({"error": "Blocked a request from another website."}), 403
+
+
+def _json_body() -> dict:
+    """The JSON object body, or {} — never trusts a non-JSON content type."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def _str(data: dict, key: str) -> str:
+    """A stripped string field; non-strings (numbers, lists) count as empty."""
+    v = data.get(key)
+    return v.strip() if isinstance(v, str) else ""
+
+
+def _is_unc(path: str) -> bool:
+    # \\server\share paths make Windows connect out over SMB (leaking the
+    # user's NTLM hash to whoever runs that server). Never touch them.
+    return path.startswith(("\\\\", "//"))
+
+
+def _inside_uploads(path: str) -> bool:
+    """Local files may only come from our own upload folder — the UI only ever
+    sends /upload results, and anything else let a LAN device convert (and then
+    download) arbitrary media files from this PC."""
+    try:
+        return Path(path).resolve().is_relative_to(UPLOAD_DIR.resolve())
+    except (OSError, ValueError):
+        return False
 
 
 def _lan_ip() -> Optional[str]:
@@ -160,8 +230,8 @@ def serve_upload(filename: str):
 
 @app.route("/preview_youtube", methods=["POST"])
 def preview_youtube():
-    data = request.get_json(force=True, silent=True) or {}
-    url = (data.get("url") or "").strip()
+    data = _json_body()
+    url = _str(data, "url")
     if not url:
         return jsonify({"error": "No URL provided."}), 400
     try:
@@ -183,8 +253,8 @@ def playlists_list():
 
 @app.route("/playlists", methods=["POST"])
 def playlists_create():
-    data = request.get_json(force=True, silent=True) or {}
-    name = (data.get("name") or "").strip()
+    data = _json_body()
+    name = _str(data, "name")
     if not name:
         return jsonify({"error": "Playlist needs a name."}), 400
     return jsonify({"playlist": playset.create_playlist(name)})
@@ -208,8 +278,8 @@ def playlist_delete(pid: str):
 
 @app.route("/playlists/<pid>/songs", methods=["POST"])
 def playlist_add_song(pid: str):
-    data = request.get_json(force=True, silent=True) or {}
-    url = (data.get("url") or "").strip()
+    data = _json_body()
+    url = _str(data, "url")
     if not downloader.is_youtube_url(url):
         return jsonify({"error": "Saving needs a valid YouTube URL."}), 400
 
@@ -226,7 +296,7 @@ def playlist_add_song(pid: str):
     quality = data.get("quality") or ("best" if output_format == "mp4" else "192")
     preserve_pitch = bool(data.get("preserve_pitch", False))
 
-    title = (data.get("title") or "").strip()
+    title = _str(data, "title")
     if not title:
         # Best-effort title lookup; falls back to the URL inside get_title.
         title = downloader.get_title(url)
@@ -246,7 +316,7 @@ def playlist_remove_song(pid: str, song_id: str):
 
 @app.route("/playlists/<pid>/reorder", methods=["POST"])
 def playlist_reorder(pid: str):
-    data = request.get_json(force=True, silent=True) or {}
+    data = _json_body()
     order = data.get("order")
     if not isinstance(order, list):
         return jsonify({"error": "order must be a list of song ids."}), 400
@@ -285,7 +355,7 @@ def _run_job(job: Job, params: dict) -> None:
             input_path = downloader.download(
                 source, output_format, quality, str(UPLOAD_DIR), on_progress=dl_progress,
             )
-        elif local_path and os.path.isfile(local_path):
+        elif local_path and _inside_uploads(local_path) and os.path.isfile(local_path):
             input_path = local_path
         else:
             raise ValueError("Provide a YouTube URL or pick a local file.")
@@ -329,7 +399,7 @@ def _run_job(job: Job, params: dict) -> None:
 
 @app.route("/convert", methods=["POST"])
 def start_convert():
-    data = request.get_json(force=True, silent=True) or {}
+    data = _json_body()
 
     # Validate speed early to give a friendly error.
     try:
@@ -339,19 +409,42 @@ def start_convert():
     if not (converter.MIN_SPEED <= s <= converter.MAX_SPEED):
         return jsonify({"error": f"Speed must be between {converter.MIN_SPEED} and {converter.MAX_SPEED}."}), 400
 
-    if data.get("output_format") not in ("mp3", "mp4"):
+    fmt = data.get("output_format")
+    if fmt not in ("mp3", "mp4"):
         return jsonify({"error": "Choose MP3 or MP4."}), 400
 
-    out_dir = (data.get("output_dir") or "").strip()
-    if not out_dir or not os.path.isdir(out_dir):
-        return jsonify({"error": "Choose a valid output folder."}), 400
+    # Quality was never checked: "quality": null reached ffmpeg as "-b:a Nonek"
+    # and only failed after the whole download.
+    allowed_q = ("192", "320") if fmt == "mp3" else ("720", "1080", "best")
+    q = data.get("quality")
+    if q in (None, ""):
+        q = allowed_q[0] if fmt == "mp3" else "best"
+    q = str(q)
+    if q not in allowed_q:
+        return jsonify({"error": f"Quality must be one of: {', '.join(allowed_q)}."}), 400
+    data["quality"] = q
 
-    source = (data.get("source") or "").strip()
-    local_path = (data.get("local_path") or "").strip()
+    # bool("false") is True — accept only a real JSON true/false.
+    pp = data.get("preserve_pitch", False)
+    if not isinstance(pp, bool):
+        return jsonify({"error": "preserve_pitch must be true or false."}), 400
+
+    # Phones/LAN devices can't see this PC's folders, so their conversions
+    # always land in the default folder rather than wherever the request says.
+    out_dir = _str(data, "output_dir") if _request_is_local() else _default_output_dir()
+    if not out_dir or _is_unc(out_dir) or not os.path.isdir(out_dir):
+        return jsonify({"error": "Choose a valid output folder."}), 400
+    data["output_dir"] = out_dir
+
+    source = _str(data, "source")
+    local_path = _str(data, "local_path")
     if not source and not local_path:
         return jsonify({"error": "Drop a file or paste a YouTube URL."}), 400
     if source and not downloader.is_youtube_url(source) and not local_path:
         return jsonify({"error": "That URL doesn't look like a YouTube link."}), 400
+    if local_path and not source and not _inside_uploads(local_path):
+        return jsonify({"error": "That file wasn't uploaded through TubeLube — drop or choose it again."}), 400
+    data["source"], data["local_path"] = source, local_path
 
     # Trim window / repeat count (all optional).
     ts, te = data.get("trim_start"), data.get("trim_end")
@@ -360,6 +453,9 @@ def start_convert():
         te = None if te in (None, "") else float(te)
     except (TypeError, ValueError):
         return jsonify({"error": "Trim positions must be numbers."}), 400
+    # NaN slips past every < / > comparison and reached ffmpeg as "-to nan".
+    if any(v is not None and not math.isfinite(v) for v in (ts, te)):
+        return jsonify({"error": "Trim positions must be real numbers."}), 400
     if ts is not None and ts < 0:
         return jsonify({"error": "Trim start can't be negative."}), 400
     if ts is not None and te is not None and te - ts < 0.05:
@@ -372,9 +468,10 @@ def start_convert():
         return jsonify({"error": "Repeat count must be between 1 and 100."}), 400
     data["trim_start"], data["trim_end"], data["loops"] = ts, te, loops
 
-    _prune_jobs()
     job = Job(id=uuid.uuid4().hex)
-    JOBS[job.id] = job
+    with _JOBS_LOCK:
+        _prune_jobs()
+        JOBS[job.id] = job
     t = threading.Thread(target=_run_job, args=(job, data), daemon=True)
     t.start()
     return jsonify({"job_id": job.id})
@@ -382,7 +479,7 @@ def start_convert():
 
 @app.route("/status/<job_id>")
 def status(job_id: str):
-    job = JOBS.get(job_id)
+    job = _get_job(job_id)
     if not job:
         return jsonify({"error": "Unknown job."}), 404
     with job.lock:
@@ -399,7 +496,7 @@ def status(job_id: str):
 def download(job_id: str):
     """Send a finished job's output file — how phones save the result, since
     'open folder' only makes sense on the machine the server runs on."""
-    job = JOBS.get(job_id)
+    job = _get_job(job_id)
     if not job:
         return jsonify({"error": "Unknown job."}), 404
     with job.lock:
@@ -413,10 +510,12 @@ def download(job_id: str):
 def open_folder():
     if not _request_is_local():
         return jsonify({"error": "Only available on the computer running TubeLube."}), 403
-    data = request.get_json(force=True, silent=True) or {}
-    path = data.get("path", "")
+    data = _json_body()
+    path = _str(data, "path")
     if not path:
         return jsonify({"error": "No path."}), 400
+    if _is_unc(path):
+        return jsonify({"error": "Network paths can't be opened from TubeLube."}), 400
     folder = path if os.path.isdir(path) else os.path.dirname(path)
     if not os.path.isdir(folder):
         return jsonify({"error": "Folder not found."}), 404
@@ -533,12 +632,19 @@ def _auto_update_ytdlp() -> None:
                     return
             except ValueError:
                 pass
-        _UPDATE_STAMP.write_text(str(now))
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--user", "--upgrade",
-             "--pre", "yt-dlp[default]"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=240,
-        )
+        # Claim this attempt with a short back-off first, so two copies starting
+        # together don't both run pip. The full 12h stamp is only written after
+        # a *successful* install — previously a failed or timed-out pip still
+        # blocked any retry for 12 hours.
+        _UPDATE_STAMP.write_text(str(now - _UPDATE_INTERVAL + 3600))
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--pre", "yt-dlp[default]"]
+        if sys.prefix == sys.base_prefix:   # --user is an error inside a venv
+            cmd.insert(4, "--user")
+        # No timeout: killing pip mid-install could leave yt-dlp half-removed,
+        # and the app would then fail to start. A slow update is harmless.
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if r.returncode == 0:
+            _UPDATE_STAMP.write_text(str(time.time()))
     except Exception:
         pass
 
