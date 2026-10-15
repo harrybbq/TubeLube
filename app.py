@@ -105,6 +105,13 @@ def _default_output_dir() -> str:
     return str(Path.home())
 
 
+@app.errorhandler(playset.PlaysetUnavailable)
+def _playset_unavailable(e):
+    # Better a clear "try again" than overwriting the user's playlists.
+    return jsonify({"error": f"Your playlists couldn't be opened just now ({e}). "
+                             "Close any other TubeLube window and try again."}), 503
+
+
 @app.route("/")
 def index():
     missing = _check_dependencies()

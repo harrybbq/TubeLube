@@ -14,6 +14,8 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional
 
+import paths
+
 # Imported lazily-tolerant: raising here (as before) crashed app.py at import,
 # so the "yt-dlp is missing" install page could never actually be shown.
 try:
@@ -42,10 +44,14 @@ _BASE_OPTS = {"noplaylist": True}
 #
 # Windows hides ".txt" by default, so users who save the file commonly end up
 # with "cookies.txt.txt" — accept both names rather than silently ignoring it.
-_COOKIES_CANDIDATES = [
-    Path(__file__).parent / "cookies.txt",
-    Path(__file__).parent / "cookies.txt.txt",
-]
+#
+# Looked up in the data folder, and — for the .exe — also next to TubeLube.exe,
+# since that's where a user will naturally drop it (see paths.py).
+_COOKIES_CANDIDATES = list(dict.fromkeys(
+    d / name
+    for d in (paths.data_dir(), paths.app_dir())
+    for name in ("cookies.txt", "cookies.txt.txt")
+))
 
 
 def _find_cookies_file() -> Optional[Path]:

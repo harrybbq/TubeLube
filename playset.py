@@ -20,14 +20,22 @@ atomic (temp file + replace) so a crash mid-write can't corrupt the store.
 from __future__ import annotations
 
 import json
+import os
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-_STORE = Path(__file__).parent / "playset.json"
+import paths
+
+_STORE = paths.data_dir() / "playset.json"
 _lock = threading.Lock()
+
+
+class PlaysetUnavailable(Exception):
+    """The store exists but couldn't be read right now (e.g. briefly locked)."""
 
 _DEFAULT_NAME = "My Playset"
 
@@ -71,13 +79,31 @@ def _read() -> dict:
     """Load + normalize the store. Persists if normalization changed the
     structure (e.g. migration / first run) so ids stay stable across reads.
     Caller must hold _lock."""
+    # Any read failure used to fall back to an empty store and then *write* it,
+    # silently wiping every playlist. Now the two failure kinds are separated.
     raw = None
     if _STORE.exists():
-        try:
-            with _STORE.open("r", encoding="utf-8") as f:
-                raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            raw = None
+        for attempt in range(6):
+            try:
+                # utf-8-sig: tolerate a BOM from hand-editing in Notepad.
+                with _STORE.open("r", encoding="utf-8-sig") as f:
+                    raw = json.load(f)
+                break
+            except json.JSONDecodeError:
+                # Genuinely damaged: keep it for recovery, then start fresh.
+                stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                try:
+                    _STORE.replace(_STORE.with_name(f"{_STORE.name}.corrupt-{stamp}"))
+                except OSError:
+                    raise PlaysetUnavailable("playset.json is damaged and couldn't be moved aside.")
+                raw = None
+                break
+            except OSError:
+                # Probably locked for a moment (antivirus, the other TubeLube
+                # window). Retry, and never overwrite it if it stays locked.
+                if attempt == 5:
+                    raise PlaysetUnavailable("playset.json is locked by another program.")
+                time.sleep(0.1)
     norm = _normalize(raw)
     if raw is not norm:   # migrated / created — persist for stable ids
         _write(norm)
@@ -85,10 +111,24 @@ def _read() -> dict:
 
 
 def _write(data: dict) -> None:
-    tmp = _STORE.with_suffix(".json.tmp")
+    # Unique temp name: a fixed one let the web app and the desktop window
+    # (separate processes) clobber each other's half-written temp file.
+    tmp = _STORE.with_name(f".{_STORE.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    tmp.replace(_STORE)  # atomic on the same filesystem
+    for attempt in range(6):
+        try:
+            tmp.replace(_STORE)  # atomic on the same filesystem
+            return
+        except PermissionError:
+            # Windows refuses the swap while another process has the file open.
+            if attempt == 5:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise PlaysetUnavailable("playset.json is locked by another program.")
+            time.sleep(0.1)
 
 
 def _find(data: dict, pid: str) -> Optional[dict]:

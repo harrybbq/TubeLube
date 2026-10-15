@@ -132,6 +132,13 @@ folder). Some antivirus tools flag fresh PyInstaller exes as a false positive �
 expected for unsigned one-file builds. To give it an icon, drop a `TubeLube.ico` in the
 project root before building.
 
+**Where the .exe keeps your data:** playlists are saved in `%APPDATA%\TubeLube\playset.json`
+(the .exe unpacks to a temporary folder that's deleted on exit, so it can't save next to
+itself). Put `cookies.txt` either next to `TubeLube.exe` or in `%APPDATA%\TubeLube`.
+Running from source (`python app.py`) still uses the project folder for both.
+
+Note the .exe can't auto-update yt-dlp — rebuild it when downloads start failing.
+
 ## How the speed transform works
 
 ffmpeg's `atempo` filter only accepts factors between 0.5 and 2.0. For anything outside that range TubeLube chains multiple `atempo` filters whose product equals the target — e.g. `0.25x` becomes `atempo=0.5,atempo=0.5`, and `4.0x` becomes `atempo=2.0,atempo=2.0`.
