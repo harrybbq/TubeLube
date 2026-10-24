@@ -131,6 +131,12 @@ def _write(data: dict) -> None:
             time.sleep(0.1)
 
 
+def _flat_eq(eq: Optional[dict]) -> dict:
+    """Normalise tone settings to {bass, mid, treble} floats (missing = 0)."""
+    eq = eq or {}
+    return {k: round(float(eq.get(k) or 0.0), 1) for k in ("bass", "mid", "treble")}
+
+
 def _find(data: dict, pid: str) -> Optional[dict]:
     for p in data["playlists"]:
         if p["id"] == pid:
@@ -220,9 +226,12 @@ def add_song(
     preserve_pitch: bool,
     output_format: str,
     quality: str,
+    eq: Optional[dict] = None,
 ) -> Optional[dict]:
     """Add a song to playlist `pid` (newest first). De-dupes on
-    url+speed+pitch. Returns the entry, or None if the playlist doesn't exist."""
+    url+speed+pitch+tone — a different bass setting is a different "version",
+    just like a different speed. Returns the entry, or None if the playlist
+    doesn't exist. Songs saved before tone existed simply lack "eq" (= flat)."""
     entry = {
         "id": uuid.uuid4().hex,
         "url": url,
@@ -231,6 +240,7 @@ def add_song(
         "preserve_pitch": bool(preserve_pitch),
         "format": output_format,
         "quality": quality,
+        "eq": _flat_eq(eq),
         "added": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     with _lock:
@@ -241,7 +251,8 @@ def add_song(
         for s in p["songs"]:
             if (s.get("url") == url
                     and s.get("speed") == entry["speed"]
-                    and s.get("preserve_pitch") == entry["preserve_pitch"]):
+                    and s.get("preserve_pitch") == entry["preserve_pitch"]
+                    and _flat_eq(s.get("eq")) == entry["eq"]):
                 return s
         p["songs"].insert(0, entry)
         _write(d)

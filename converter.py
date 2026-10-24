@@ -98,6 +98,47 @@ def _has_rubberband() -> bool:
     return _rubberband_cache
 
 
+# ── Tone (EQ) ──────────────────────────────────────────────────────────────
+# Three bands, mirrored exactly by the browser preview (EQ_BANDS in index.html)
+# so what you hear while tweaking is what gets exported:
+#   bass   → low shelf @ 100 Hz   (Web Audio "lowshelf")
+#   mid    → peak     @ 1 kHz, Q=1 (Web Audio "peaking")
+#   treble → high shelf @ 8 kHz   (Web Audio "highshelf")
+# Web Audio's shelves follow the RBJ cookbook with slope S=1 and ignore Q, so
+# ffmpeg's shelves must be `t=s:w=1` — the filters' default (t=q:w=0.5) is a
+# different curve and the export would sound different from the preview.
+EQ_BANDS = {"bass": 100, "mid": 1000, "treble": 8000}
+EQ_LIMIT_DB = 12.0
+
+
+def _eq_filter(eq: Optional[dict]) -> str:
+    """ffmpeg filter for the tone settings, or "" when flat (output unchanged)."""
+    g = {k: float((eq or {}).get(k) or 0.0) for k in EQ_BANDS}
+    if not any(g.values()):
+        return ""
+    chain = [
+        f"bass=g={g['bass']:g}:f={EQ_BANDS['bass']}:t=s:w=1",
+        f"equalizer=f={EQ_BANDS['mid']}:t=q:w=1:g={g['mid']:g}",
+        f"treble=g={g['treble']:g}:f={EQ_BANDS['treble']}:t=s:w=1",
+    ]
+    # A boost can push peaks past full scale, which the encoder would clip
+    # harshly. A transparent limiter catches only those peaks (the preview uses
+    # a matching DynamicsCompressor at -1 dB).
+    if any(v > 0 for v in g.values()):
+        chain.append("alimiter=limit=0.98:attack=5:release=50:level=disabled")
+    return ",".join(chain)
+
+
+def _eq_tag(eq: Optional[dict]) -> str:
+    """Filename tag for non-zero bands, e.g. 'B+6_T-3'; "" when flat."""
+    parts = []
+    for key, letter in (("bass", "B"), ("mid", "M"), ("treble", "T")):
+        v = float((eq or {}).get(key) or 0.0)
+        if v:
+            parts.append(f"{letter}{v:+g}")
+    return "_".join(parts)
+
+
 def _audio_filter(speed: float, preserve_pitch: bool, sample_rate: int) -> str:
     """Build the -filter:a expression."""
     if preserve_pitch:
@@ -136,7 +177,7 @@ def _audio_filter(speed: float, preserve_pitch: bool, sample_rate: int) -> str:
 
 def _build_output_name(src: str, speed: float, ext: str, out_dir: str,
                        start: Optional[float] = None, end: Optional[float] = None,
-                       loops: int = 1) -> str:
+                       loops: int = 1, eq: Optional[dict] = None) -> str:
     """Generate e.g. 'mytrack_0.75x.mp3', or 'mytrack_0.75x_t12-40_x3.mp3' when
     a section was trimmed and/or repeated. Avoids collisions."""
     stem = Path(src).stem
@@ -146,6 +187,8 @@ def _build_output_name(src: str, speed: float, ext: str, out_dir: str,
         parts.append(f"t{s:g}-{end:g}" if end is not None else f"t{s:g}")
     if loops and loops > 1:
         parts.append(f"x{int(loops)}")
+    if _eq_tag(eq):
+        parts.append(_eq_tag(eq))
     stem_full = "_".join(parts)
     # Strip filesystem-unfriendly chars
     stem_full = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stem_full)
@@ -229,6 +272,7 @@ def convert(
     start: Optional[float] = None,   # trim: section start in source seconds
     end: Optional[float] = None,     # trim: section end in source seconds
     loops: int = 1,                  # repeat the (trimmed) section N times
+    eq: Optional[dict] = None,       # tone: {"bass","mid","treble"} in dB (±12)
 ) -> str:
     """Run ffmpeg to produce the sped/slowed file. Returns the output path.
 
@@ -250,6 +294,12 @@ def convert(
     sr = _probe_sample_rate(input_path)
     duration = _probe_duration(input_path)
     audio_filter = _audio_filter(speed, preserve_pitch, sr)
+    # EQ goes AFTER the speed change — the browser preview filters audio that's
+    # already rate-changed (and pitch-shifted in pitch-follows mode), so this is
+    # the only order where "bass" means the same frequencies in both.
+    eq_chain = _eq_filter(eq)
+    if eq_chain:
+        audio_filter = f"{audio_filter},{eq_chain}"
 
     # ── Normalise the trim window ──
     loops = max(1, int(loops or 1))
@@ -268,7 +318,7 @@ def convert(
     # ".part" file that's renamed over it only on success, so a failed or killed
     # conversion never leaves a truncated song in the output folder.
     out_path = _build_output_name(input_path, speed, output_format, output_dir,
-                                  start, end, loops)
+                                  start, end, loops, eq)
     final = Path(out_path)
     part = final.with_name(f"{final.stem}.part{final.suffix}")  # ffmpeg muxes by last extension
 

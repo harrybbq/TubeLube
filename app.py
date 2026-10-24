@@ -144,6 +144,25 @@ def _is_unc(path: str) -> bool:
     return path.startswith(("\\\\", "//"))
 
 
+def _parse_eq(data: dict):
+    """Validate the optional tone settings. Returns (eq_dict, error_message).
+    Missing → flat. Each band is dB within ±EQ_LIMIT_DB; anything else is a 400."""
+    raw = data.get("eq")
+    if raw in (None, ""):
+        return {k: 0.0 for k in converter.EQ_BANDS}, None
+    if not isinstance(raw, dict):
+        return None, "Tone settings must be an object like {bass, mid, treble}."
+    out = {}
+    for band in converter.EQ_BANDS:
+        v = raw.get(band, 0)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            return None, f"{band.capitalize()} must be a number of dB."
+        if abs(v) > converter.EQ_LIMIT_DB:
+            return None, f"{band.capitalize()} must be between -{converter.EQ_LIMIT_DB:g} and +{converter.EQ_LIMIT_DB:g} dB."
+        out[band] = round(float(v), 1)
+    return out, None
+
+
 def _inside_uploads(path: str) -> bool:
     """Local files may only come from our own upload folder — the UI only ever
     sends /upload results, and anything else let a LAN device convert (and then
@@ -301,7 +320,10 @@ def playlist_add_song(pid: str):
         # Best-effort title lookup; falls back to the URL inside get_title.
         title = downloader.get_title(url)
 
-    entry = playset.add_song(pid, url, title, speed, preserve_pitch, output_format, quality)
+    eq, err = _parse_eq(data)
+    if err:
+        return jsonify({"error": err}), 400
+    entry = playset.add_song(pid, url, title, speed, preserve_pitch, output_format, quality, eq)
     if entry is None:
         return jsonify({"error": "Playlist not found."}), 404
     return jsonify({"song": entry})
@@ -384,6 +406,7 @@ def _run_job(job: Job, params: dict) -> None:
             start=params.get("trim_start"),
             end=params.get("trim_end"),
             loops=int(params.get("loops") or 1),
+            eq=params.get("eq"),
         )
         with job.lock:
             job.status = "done"
@@ -467,6 +490,10 @@ def start_convert():
     if not (1 <= loops <= 100):
         return jsonify({"error": "Repeat count must be between 1 and 100."}), 400
     data["trim_start"], data["trim_end"], data["loops"] = ts, te, loops
+    eq, err = _parse_eq(data)
+    if err:
+        return jsonify({"error": err}), 400
+    data["eq"] = eq
 
     job = Job(id=uuid.uuid4().hex)
     with _JOBS_LOCK:

@@ -265,6 +265,18 @@
   .range-track input[type=range]::-moz-range-thumb { width: 14px; height: 14px; background: var(--ember); border: 2px solid var(--bg-0); box-shadow: 0 0 0 1px var(--ember-line); transform: rotate(45deg); cursor: pointer; }
   .range-ticks { margin-top: 4px; display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
 
+  .tone-head { display:flex; align-items:center; justify-content:space-between; }
+  .tone-head .label { margin-bottom: 0; }
+  .tone-rows { display:flex; flex-direction:column; gap: 4px; margin-top: 10px; }
+  .tone-row { display:grid; grid-template-columns: 58px 1fr 64px; align-items:center; gap: 12px; }
+  .tone-row .tk { font-size: 11px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-mute); }
+  .tone-row .tv { font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); text-align: right; font-variant-numeric: tabular-nums; }
+  .tone-row.on .tv { color: var(--ember); }
+  .tone-row .range-track { height: 28px; }
+  /* Fill grows out from the 0 dB centre, not from the left edge. */
+  .tone-row .range-track input[type=range]::-webkit-slider-runnable-track { background: linear-gradient(90deg, var(--rule) var(--lo, 50%), var(--ember) var(--lo, 50%), var(--ember) var(--hi, 50%), var(--rule) var(--hi, 50%)); }
+  .tone-row .range-track input[type=range]::-moz-range-progress { background: transparent; }
+  .tone-note { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
   .pitch-row { display:flex; align-items:flex-start; gap: 10px; cursor: pointer; user-select:none; }
   .pitch-row input { position:absolute; opacity:0; pointer-events:none; }
   .pitch-box { width: 16px; height: 16px; flex-shrink: 0; border: 1px solid var(--panel-edge-bright); background: rgba(0,0,0,0.22); margin-top: 3px; border-radius: 4px; display:grid; place-items:center; transition: all .15s ease; color: var(--bg-0); }
@@ -655,6 +667,20 @@
           </div>
         </div>
 
+        <!-- TONE -->
+        <div>
+          <div class="tone-head">
+            <div class="label">Tone</div>
+            <button class="btn tiny" id="toneFlat" title="Reset bass, mid and treble to 0 dB">Flat</button>
+          </div>
+          <div class="tone-rows">
+            <div class="tone-row" data-band="bass"><span class="tk">Bass</span><div class="range-track"><input type="range" min="-12" max="12" step="0.5" value="0" aria-label="Bass (dB)"></div><span class="tv">0 dB</span></div>
+            <div class="tone-row" data-band="mid"><span class="tk">Mid</span><div class="range-track"><input type="range" min="-12" max="12" step="0.5" value="0" aria-label="Mid (dB)"></div><span class="tv">0 dB</span></div>
+            <div class="tone-row" data-band="treble"><span class="tk">Treble</span><div class="range-track"><input type="range" min="-12" max="12" step="0.5" value="0" aria-label="Treble (dB)"></div><span class="tv">0 dB</span></div>
+          </div>
+          <div class="tone-note" id="toneNote">Heard live in the preview and baked into the export. Double-click a slider to zero it.</div>
+        </div>
+
         <!-- SAVE -->
         <div>
           <div class="label">Save to</div>
@@ -750,6 +776,7 @@
       <div class="od-row"><span class="k">Speed</span><span class="v" id="odSpeed">1.00×</span></div>
       <div class="od-row"><span class="k">Tempo</span><span class="v" id="odTempo">Normal</span></div>
       <div class="od-row"><span class="k">Pitch</span><span class="v" id="odPitch">Follows speed</span></div>
+      <div class="od-row"><span class="k">Tone</span><span class="v" id="odTone">Flat</span></div>
       <div class="od-row"><span class="k">Save to</span><span class="v mono" id="odSave">—</span></div>
     </div>
   </div>
@@ -944,6 +971,96 @@
     if (e.target.tagName !== "INPUT") { e.preventDefault(); $("preservePitch").checked = !$("preservePitch").checked; syncPitch(); }
   });
 
+  // ── Tone (bass / mid / treble) ────────────────────────────────────────
+  // Same shapes as converter._eq_filter so the preview sounds like the export:
+  // low shelf 100 Hz, peak 1 kHz (Q 1), high shelf 8 kHz, ±12 dB, plus a
+  // limiter only while a band is boosted (stops clipping).
+  const TONE_BANDS = [["bass", "Bass", "B"], ["mid", "Mid", "M"], ["treble", "Treble", "T"]];
+  function toneInput(band) { return document.querySelector(`.tone-row[data-band="${band}"] input`); }
+  function curTone() {
+    const t = {};
+    for (const [b] of TONE_BANDS) { const v = Number(toneInput(b).value); t[b] = isFinite(v) ? Math.max(-12, Math.min(12, v)) : 0; }
+    return t;
+  }
+  const fmtDb = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
+  function isFlat(eq) { return TONE_BANDS.every(([b]) => !(Number((eq || {})[b]) || 0)); }
+  function toneParts(eq, long) {
+    eq = eq || {};
+    return TONE_BANDS.filter(([b]) => Number(eq[b]) || 0)
+      .map(([b, name, ab]) => long ? `${name} ${fmtDb(Number(eq[b]))}` : `${ab}${fmtDb(Number(eq[b]))}`);
+  }
+  function toneShort(eq = curTone()) { const p = toneParts(eq, false); return p.length ? "EQ " + p.join(" ") : ""; }
+  function toneLong(eq = curTone()) { return toneParts(eq, true).map(x => x + " dB").join(" · "); }
+
+  function paintTone() {
+    for (const [b] of TONE_BANDS) {
+      const inp = toneInput(b), row = inp.closest(".tone-row"), v = Number(inp.value);
+      const pct = (v + 12) / 24 * 100, txt = (v ? fmtDb(v) : "0") + " dB";
+      inp.style.setProperty("--lo", Math.min(50, pct) + "%");
+      inp.style.setProperty("--hi", Math.max(50, pct) + "%");
+      row.querySelector(".tv").textContent = txt;
+      row.classList.toggle("on", v !== 0);
+      inp.setAttribute("aria-valuetext", txt);
+    }
+  }
+  function onToneChange() { paintTone(); applyTone(); updateOutputDetails(); }
+  function setTone(eq) {
+    eq = eq || {};
+    for (const [b] of TONE_BANDS) toneInput(b).value = Number(eq[b]) || 0;
+    onToneChange();
+  }
+  for (const [b] of TONE_BANDS) {
+    const inp = toneInput(b);
+    inp.addEventListener("input", onToneChange);
+    inp.addEventListener("dblclick", () => { inp.value = 0; onToneChange(); });
+  }
+  $("toneFlat").addEventListener("click", () => setTone(null));
+
+  // The Web Audio graph is built lazily, the first time tone isn't flat, and
+  // only once the AudioContext is actually running: routing the <audio> into a
+  // suspended context (autoplay policy) would silence it. Until then — or if
+  // Web Audio fails — playback simply stays flat. Once wired, the element's
+  // sound always goes through the graph; flat tone = 0 dB filters, no limiter.
+  let toneGraph = null, toneCtx = null, toneWiring = false;
+  async function wireTone() {
+    if (toneGraph || toneWiring || isFlat(curTone())) return;
+    toneWiring = true;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      toneCtx = toneCtx || new AC();
+      if (toneCtx.state !== "running") { try { await toneCtx.resume(); } catch (_) {} }
+      if (toneCtx.state !== "running") return;   // no user gesture yet — retried on the next one
+      const ctx = toneCtx, src = ctx.createMediaElementSource($("previewAudio"));
+      const mk = (type, f, q) => { const n = ctx.createBiquadFilter(); n.type = type; n.frequency.value = f; if (q) n.Q.value = q; n.gain.value = 0; return n; };
+      const bass = mk("lowshelf", 100), mid = mk("peaking", 1000, 1), treble = mk("highshelf", 8000);
+      const lim = ctx.createDynamicsCompressor();
+      lim.threshold.value = -1; lim.knee.value = 0; lim.ratio.value = 1; lim.attack.value = 0.003; lim.release.value = 0.05;
+      src.connect(bass); bass.connect(mid); mid.connect(treble); treble.connect(lim); lim.connect(ctx.destination);
+      toneGraph = { bass, mid, treble, lim };
+      applyTone();
+    } catch (err) {
+      console.warn("Tone preview unavailable:", err);
+      $("toneNote").textContent = "Live tone preview isn't available here — it will still be applied to the export.";
+    } finally { toneWiring = false; }
+  }
+  function applyTone() {
+    const t = curTone();
+    if (!toneGraph) { if (!isFlat(t)) wireTone(); return; }
+    const now = toneCtx.currentTime;
+    for (const [b] of TONE_BANDS) toneGraph[b].gain.setTargetAtTime(t[b], now, 0.015);
+    // Limit only while boosting, mirroring ffmpeg's conditional alimiter.
+    toneGraph.lim.ratio.value = TONE_BANDS.some(([b]) => t[b] > 0) ? 20 : 1;
+  }
+  // A tone restored without a click (queue advance, playSong after a slow
+  // fetch) can't start audio; the next gesture or play gets another go.
+  ["pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, () => { if (!toneGraph) wireTone(); }, true));
+  $("previewAudio").addEventListener("play", () => {
+    if (!toneGraph) wireTone();
+    else if (toneCtx.state !== "running") toneCtx.resume().catch(() => {});
+  });
+  paintTone();
+
   function applyPreviewSettings() {
     const a = $("previewAudio");
     if (!a.src) return;
@@ -955,12 +1072,14 @@
   function pitchShort() { return $("preservePitch").checked ? "pitch preserved" : "pitch follows"; }
   function updateOutputDetails() {
     const spd = curSpeed();
-    $("actionSummary").textContent = `${state.format.toUpperCase()} · ${qualityLabel()} · ${fmtSpeed(spd)} · ${pitchShort()}`;
+    const tone = toneShort();
+    $("actionSummary").textContent = `${state.format.toUpperCase()} · ${qualityLabel()} · ${fmtSpeed(spd)} · ${pitchShort()}` + (tone ? ` · ${tone}` : "");
     $("odFormat").textContent = state.format.toUpperCase();
     $("odQuality").textContent = qualityLabel();
     $("odSpeed").textContent = fmtSpeed(spd);
     $("odTempo").textContent = tempoOf(spd);
     $("odPitch").textContent = $("preservePitch").checked ? "Preserved" : "Follows speed";
+    $("odTone").textContent = toneLong() || "Flat";
     $("odSave").textContent = $("outDir").value || "—";
   }
 
@@ -1138,7 +1257,7 @@
       const meta = document.createElement("div"); meta.className = "lib-meta";
       const t = document.createElement("div"); t.className = "lib-title"; t.textContent = s.title || s.url; t.title = s.title || s.url;
       const sub = document.createElement("div"); sub.className = "lib-sub";
-      sub.innerHTML = `<span class="badge">${(s.format||"mp3").toUpperCase()} · ${fmtSpeed(s.speed)}</span>` + (s.preserve_pitch ? " · pitch kept" : " · pitch follows");
+      sub.innerHTML = `<span class="badge">${(s.format||"mp3").toUpperCase()} · ${fmtSpeed(s.speed)}</span>` + (s.preserve_pitch ? " · pitch kept" : " · pitch follows") + (isFlat(s.eq) ? "" : " · " + toneShort(s.eq));
       meta.appendChild(t); meta.appendChild(sub);
 
       const rm = document.createElement("button"); rm.className = "lib-remove"; rm.textContent = "×"; rm.title = "Remove";
@@ -1304,6 +1423,7 @@
     selectFormat(s.format || "mp3", s.quality);
     $("preservePitch").checked = !!s.preserve_pitch; syncPitch();
     setSpeed(s.speed);
+    setTone(s.eq);            // a saved version replays its own tone (older songs = flat)
     currentSongId = s.id;
     nowPlaying = { title: s.title || s.url, url: s.url, speed: s.speed, preserve_pitch: s.preserve_pitch, format: s.format, quality: s.quality };
     renderNowPlaying(); renderLibrary();
@@ -1600,7 +1720,7 @@
   });
   document.addEventListener("click", (e) => { if (!saveMenu.contains(e.target) && e.target !== $("savePlaylistBtn")) closeSaveMenu(); });
   function currentSaveBody() {
-    return { url: $("urlInput").value.trim(), output_format: state.format, quality: state.quality, speed: curSpeed(), preserve_pitch: $("preservePitch").checked };
+    return { url: $("urlInput").value.trim(), output_format: state.format, quality: state.quality, speed: curSpeed(), preserve_pitch: $("preservePitch").checked, eq: curTone() };
   }
   async function saveInto(pid) {
     closeSaveMenu();
@@ -1635,7 +1755,7 @@
     const url = $("urlInput").value.trim();
     if (!url && !state.localPath) { showError("Drop a file or paste a YouTube URL."); return; }
     if (!$("outDir").value.trim()) { showError("Choose an output folder."); return; }
-    const body = { source: url, local_path: state.localPath || "", output_format: state.format, quality: state.quality, speed: curSpeed(), preserve_pitch: $("preservePitch").checked, output_dir: $("outDir").value.trim() };
+    const body = { source: url, local_path: state.localPath || "", output_format: state.format, quality: state.quality, speed: curSpeed(), preserve_pitch: $("preservePitch").checked, eq: curTone(), output_dir: $("outDir").value.trim() };
     // Only send a trim window when the user actually narrowed it.
     if (!trimIsFull()) { body.trim_start = trimStart; body.trim_end = trimEnd; }
     const reps = Math.max(1, parseInt($("repCount").value, 10) || 1);
