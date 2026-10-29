@@ -375,6 +375,81 @@
   .rep-ctl input::-webkit-outer-spin-button, .rep-ctl input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .trim-out { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--ember); }
 
+  /* Clip edit active: the trim controls give way to a summary of the edit. */
+  .clip-sum { display: none; flex-direction: column; gap: 10px; }
+  .trim-panel.has-edit > :not(.trim-head):not(.clip-sum) { display: none; }
+  .trim-panel.has-edit .clip-sum { display: flex; }
+  .trim-panel.has-edit #trimReset { display: none; }
+  .trim-head-acts { display: flex; gap: 6px; }
+  .clip-sum-strip { display: flex; gap: 2px; height: 30px; }
+  .clip-sum-strip span { min-width: 6px; border-radius: 4px; background: var(--ember-soft); border: 1px solid var(--ember-line); font-family: var(--font-mono); font-size: 10px; color: var(--ember); display: grid; place-items: center; overflow: hidden; }
+  .clip-sum-row { display: flex; align-items: center; gap: 10px; }
+  .clip-sum-row .tt-v { margin-left: 0; }
+  .clip-sum-row .btn { margin-left: auto; }
+
+  /* — Clip editor (full-window sheet over the app) ———————————— */
+  .ce { position: fixed; inset: 0; z-index: 90; overflow-y: auto; background: rgba(8, 15, 25, 0.94); backdrop-filter: blur(6px); --danger: #d97a7a; --danger-soft: rgba(217,122,122,0.14); }
+  .ce[hidden] { display: none; }
+  .ce-wrap { max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 16px; }
+  .ce-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .ce-top h2 { margin: 0; font-size: 21px; font-weight: 600; color: var(--ink); }
+  .ce-top h2 .dim { color: var(--ink-mute); font-weight: 400; }
+  .ce-sub { margin: 4px 0 0; color: var(--ink-mute); font-size: 13px; }
+  .ce-top-acts { display: flex; gap: 8px; }
+  .ce-panel { background: rgba(232,228,214,0.035); border: 1px solid var(--panel-edge); border-radius: 12px; padding: 16px 18px; }
+  .ce-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; flex-wrap: wrap; }
+  .ce-micro { font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-mute); }
+  .ce-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ce .btn { display: inline-flex; align-items: center; gap: 7px; }
+  .ce .btn:disabled { opacity: .38; cursor: not-allowed; }
+  .ce .btn kbd { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0; color: var(--ink-faint); border: 1px solid var(--rule); border-radius: 4px; padding: 0 4px; }
+  .ce .btn.primary { background: var(--ember); color: var(--bg-0); border-color: var(--ember); }
+  .ce .btn.primary kbd { color: rgba(10,19,32,.6); border-color: rgba(10,19,32,.25); }
+  .ce .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .ce .btn.danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+  .ce-sep { width: 1px; height: 22px; background: var(--rule); margin: 0 3px; }
+  .ce-time { font-family: var(--font-mono); font-size: 13px; color: var(--ink-soft); min-width: 92px; }
+  .ce-sel { margin-left: auto; }
+  .ce-src { position: relative; height: 46px; border-radius: 7px; overflow: hidden; background: rgba(0,0,0,0.28); border: 1px solid var(--rule); }
+  .ce-src canvas { display: block; width: 100%; height: 100%; }
+  .ce-used { position: absolute; top: 0; bottom: 0; background: var(--ember-soft); border-left: 1px solid var(--ember-line); border-right: 1px solid var(--ember-line); pointer-events: none; }
+  .ce-src-head { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink); opacity: .7; pointer-events: none; }
+  .ce-scale { display: flex; justify-content: space-between; margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
+  .ce-ruler { position: relative; height: 20px; cursor: pointer; border-bottom: 1px solid var(--rule); margin-bottom: 8px; touch-action: none; }
+  .ce-ruler .tick { position: absolute; bottom: 0; width: 1px; height: 6px; background: var(--ink-faint); }
+  .ce-ruler .tick span { position: absolute; bottom: 8px; left: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); white-space: nowrap; }
+  .ce-lane { position: relative; display: flex; gap: 3px; height: 104px; user-select: none; touch-action: none; }
+  .ce-clip { position: relative; min-width: 14px; border-radius: 6px; overflow: hidden; cursor: grab; background: rgba(200,150,101,0.10); border: 1px solid var(--ember-line); transition: background .12s, border-color .12s; }
+  .ce-clip:hover { background: rgba(200,150,101,0.16); }
+  .ce-clip.sel { background: rgba(200,150,101,0.24); border-color: var(--ember); box-shadow: 0 0 0 1px var(--ember), 0 8px 22px -10px rgba(0,0,0,.8); }
+  .ce-clip.dragging { opacity: .45; cursor: grabbing; }
+  .ce-clip canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .ce-tag, .ce-len, .ce-rep { position: absolute; font-family: var(--font-mono); font-size: 10px; border-radius: 4px; padding: 1px 5px; pointer-events: none; }
+  .ce-tag { top: 5px; left: 6px; color: var(--ink); background: rgba(10,19,32,.66); }
+  .ce-len { bottom: 5px; left: 6px; color: var(--ink-soft); background: rgba(10,19,32,.6); }
+  .ce-rep { top: 5px; right: 6px; font-weight: 600; color: var(--bg-0); background: var(--ember); }
+  .ce-drop { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ember); box-shadow: 0 0 10px var(--ember); pointer-events: none; }
+  .ce-playhead { position: absolute; top: -28px; bottom: 0; width: 2px; margin-left: -1px; background: var(--ink); pointer-events: none; }
+  .ce-playhead::before { content: ""; position: absolute; top: 0; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--ink); }
+  .ce-empty { display: grid; place-items: center; width: 100%; color: var(--ink-faint); font-size: 13px; border: 1px dashed var(--rule); border-radius: 7px; }
+  .ce-cols { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; }
+  .ce-rows { display: flex; flex-direction: column; }
+  .ce-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 2px; border-bottom: 1px solid var(--rule); font-size: 13px; }
+  .ce-row:last-child { border-bottom: 0; }
+  .ce-row .k { color: var(--ink-mute); }
+  .ce-row .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+  .ce-row .v.hi { color: var(--ember); }
+  .ce-stepper { display: inline-flex; align-items: center; gap: 6px; }
+  .ce-stepper .btn { width: 26px; height: 26px; padding: 0; justify-content: center; font-size: 14px; letter-spacing: 0; }
+  .ce-stepper .n { min-width: 30px; text-align: center; }
+  .ce-total { font-family: var(--font-mono); font-size: 30px; font-variant-numeric: tabular-nums; color: var(--ember); letter-spacing: -0.01em; }
+  .ce-note { color: var(--ink-mute); font-size: 12.5px; margin: 0; }
+  @media (max-width: 780px) {
+    .ce-cols { grid-template-columns: 1fr; }
+    .ce-wrap { padding: 18px 16px 40px; }
+    .ce .btn kbd { display: none; }
+  }
+
   /* — Right panel ———————————————————————————————————————— */
   .right { grid-area: right; overflow-y: auto; padding: 16px; }
   .right::-webkit-scrollbar { width: 8px; }
@@ -425,7 +500,7 @@
   .vol .vfill::after { content:""; position:absolute; right:-4px; top:50%; width:9px; height:9px; border-radius:50%; background: var(--ink); transform: translateY(-50%); }
 
   /* — Toast ———————————————————————————————————————————— */
-  .toast { position: fixed; left: 50%; bottom: 104px; transform: translateX(-50%) translateY(20px); opacity:0; pointer-events:none; z-index: 50; background: var(--bg-1); border: 1px solid var(--ember-line); color: var(--ink); padding: 13px 22px; border-radius: 10px; display:flex; align-items: center; gap: 14px; font-size: 13px; box-shadow: 0 20px 60px rgba(0,0,0,0.55); transition: opacity .2s ease, transform .2s ease; }
+  .toast { position: fixed; left: 50%; bottom: 104px; transform: translateX(-50%) translateY(20px); opacity:0; pointer-events:none; z-index: 95; background: var(--bg-1); border: 1px solid var(--ember-line); color: var(--ink); padding: 13px 22px; border-radius: 10px; display:flex; align-items: center; gap: 14px; font-size: 13px; box-shadow: 0 20px 60px rgba(0,0,0,0.55); transition: opacity .2s ease, transform .2s ease; }
   .toast.show { opacity:1; transform: translateX(-50%) translateY(0); pointer-events:auto; }
   .toast .glyph { color: var(--ember); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
 
@@ -457,6 +532,7 @@
   /* Custom checkboxes: the real input is hidden, so ring the drawn box. */
   .pitch-row input:focus-visible + .pitch-box,
   .trim-check input:focus-visible + .pitch-box { outline: 2px solid var(--ember); outline-offset: 2px; }
+  .ce-clip:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
   @media (max-width: 820px) {
     .app { grid-template-columns: minmax(0,1fr); grid-template-areas: "topbar" "main" "player"; }
     /* Sidebar becomes a slide-in drawer, opened from the topbar library button. */
@@ -710,10 +786,21 @@
         </div>
       </div>
 
-      <div class="trim-panel">
+      <div class="trim-panel" id="trimPanel">
         <div class="trim-head">
           <span class="trim-eyebrow">Trim &amp; Loop</span>
-          <button class="btn tiny" id="trimReset">Reset</button>
+          <div class="trim-head-acts">
+            <button class="btn tiny" id="openClips" title="Cut the track into clips, reorder and repeat them">✂ Clips</button>
+            <button class="btn tiny" id="trimReset">Reset</button>
+          </div>
+        </div>
+
+        <div class="clip-sum">
+          <div class="clip-sum-strip" id="clipSumStrip" aria-hidden="true"></div>
+          <div class="clip-sum-row">
+            <span class="tt-k">Clip edit</span><span class="tt-v accent" id="clipSumText">—</span>
+            <button class="btn tiny" id="clipSumClear" title="Go back to the whole track">Remove</button>
+          </div>
         </div>
 
         <div class="tl-wrap">
@@ -777,6 +864,7 @@
       <div class="od-row"><span class="k">Tempo</span><span class="v" id="odTempo">Normal</span></div>
       <div class="od-row"><span class="k">Pitch</span><span class="v" id="odPitch">Follows speed</span></div>
       <div class="od-row"><span class="k">Tone</span><span class="v" id="odTone">Flat</span></div>
+      <div class="od-row"><span class="k">Edit</span><span class="v" id="odEdit">Whole track</span></div>
       <div class="od-row"><span class="k">Save to</span><span class="v mono" id="odSave">—</span></div>
     </div>
   </div>
@@ -817,6 +905,69 @@
 
 <div class="drawer-scrim" id="drawerScrim"></div>
 
+<div class="ce" id="clipEditor" role="dialog" aria-modal="true" aria-labelledby="ceTitle" hidden>
+  <div class="ce-wrap">
+    <header class="ce-top">
+      <div>
+        <h2 id="ceTitle">Clip editor <span class="dim" id="ceTrack"></span></h2>
+        <p class="ce-sub">Chop the track into clips, drop the parts you don't want, repeat the parts you do. Changes apply as you go.</p>
+      </div>
+      <div class="ce-top-acts">
+        <button class="btn danger" id="ceRemove" title="Throw the edit away and use the whole track">Remove edit</button>
+        <button class="btn primary" id="ceDone">Done <kbd>Esc</kbd></button>
+      </div>
+    </header>
+
+    <div class="ce-panel ce-toolbar">
+      <button class="btn" id="cePlay">▶ Play <kbd>Space</kbd></button>
+      <span class="ce-time" id="ceTime">0:00 / 0:00</span>
+      <div class="ce-sep" role="presentation"></div>
+      <button class="btn primary" id="ceSplit" title="Cut the clip under the playhead in two">✂ Split <kbd>S</kbd></button>
+      <button class="btn" id="ceDup" title="Play the selected clip one more time">⧉ Repeat <kbd>D</kbd></button>
+      <button class="btn danger" id="ceDel" title="Remove the selected clip">Delete <kbd>Del</kbd></button>
+      <div class="ce-sep" role="presentation"></div>
+      <button class="btn" id="ceUndo">↶ Undo <kbd>Ctrl Z</kbd></button>
+      <button class="btn" id="ceReset" title="Back to one clip of the whole track">↺ Start over</button>
+      <span class="ce-micro ce-sel" id="ceSelLabel">No clip selected</span>
+    </div>
+
+    <div class="ce-panel">
+      <div class="ce-head-row">
+        <span class="ce-micro">Source · original track</span>
+        <span class="ce-micro" style="color:var(--ink-faint)" id="ceSrcInfo">—</span>
+      </div>
+      <div class="ce-src" id="ceSrc"><canvas id="ceSrcCanvas"></canvas><div class="ce-src-head" id="ceSrcHead"></div></div>
+      <div class="ce-scale"><span>0:00</span><span id="ceSrcEnd">0:00</span></div>
+    </div>
+
+    <div class="ce-panel">
+      <div class="ce-head-row">
+        <span class="ce-micro">Arrangement · what gets exported</span>
+        <span class="ce-micro" style="color:var(--ink-faint)">click to move the playhead · drag clips to reorder</span>
+      </div>
+      <div class="ce-ruler" id="ceRuler" title="Click to move the playhead"></div>
+      <div class="ce-lane" id="ceLane"></div>
+    </div>
+
+    <div class="ce-cols">
+      <div class="ce-panel">
+        <div class="ce-head-row"><span class="ce-micro">Selected clip</span></div>
+        <div class="ce-rows" id="ceInspector"></div>
+      </div>
+      <div class="ce-panel">
+        <div class="ce-head-row"><span class="ce-micro">Export</span></div>
+        <div class="ce-total" id="ceOutTotal">0:00</div>
+        <p class="ce-note" id="ceOutBreak">Nothing to export yet.</p>
+        <div class="ce-rows" style="margin-top:12px">
+          <div class="ce-row"><span class="k">Clips</span><span class="v" id="ceOutClips">0</span></div>
+          <div class="ce-row"><span class="k">Kept from source</span><span class="v" id="ceOutKept">0%</span></div>
+          <div class="ce-row"><span class="k">Speed</span><span class="v hi" id="ceOutSpeed">1.00×</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite"><span class="glyph" id="toastGlyph">Done</span><span id="toastText"></span><button class="btn" id="toastAction" style="display:none">Open folder</button></div>
 
 <audio id="previewAudio" preload="metadata"></audio>
@@ -841,6 +992,7 @@
   let filter = "all";        // all | audio | video
   let qIndex = -1, qActive = false, currentSongId = null, dragId = null;
   let repeatMode = 0;        // 0 off, 1 all, 2 one
+  let ceClips = null;        // clip edit for the loaded track (null = none) — see "Clip editor"
   // Playback follows `playOrder` (a list of indices into psongs) at `playPos`.
   // When shuffle is on, playOrder is a hidden random permutation — psongs (the
   // visible/saved list) is never touched. When off, playOrder is sequential.
@@ -881,13 +1033,22 @@
     const a = $("previewAudio");
     return (a.src && a.playbackRate) || curSpeed() || 1;
   }
+  // With a clip edit, "where are we / how long is it" means the arrangement,
+  // not the source file. Everything on the player bar goes through these.
+  function headPos() { return editActive() ? armPos() : $("previewAudio").currentTime; }
+  function headTotal() { return editActive() ? armTotal() : $("previewAudio").duration; }
+  function seekHead(t) {
+    const a = $("previewAudio");
+    if (editActive()) armSeek(t);
+    else if (a.duration) a.currentTime = Math.min(a.duration, Math.max(0, t));
+  }
   function updateTimes() {
-    const a = $("previewAudio"), rate = effectiveRate();
-    $("curTime").textContent = fmtTime(a.currentTime / rate);
-    $("totTime").textContent = fmtTime(a.duration / rate);   // NaN before metadata → "0:00"
+    const rate = effectiveRate(), pos = headPos(), tot = headTotal();
+    $("curTime").textContent = fmtTime(pos / rate);
+    $("totTime").textContent = fmtTime(tot / rate);   // NaN before metadata → "0:00"
     const sc = $("scrub");
-    sc.setAttribute("aria-valuenow", a.duration ? Math.round(a.currentTime / a.duration * 100) : 0);
-    sc.setAttribute("aria-valuetext", `${fmtTime(a.currentTime / rate)} of ${fmtTime(a.duration / rate)}`);
+    sc.setAttribute("aria-valuenow", tot ? Math.round(pos / tot * 100) : 0);
+    sc.setAttribute("aria-valuetext", `${fmtTime(pos / rate)} of ${fmtTime(tot / rate)}`);
   }
 
   // ── Toast / error ─────────────────────────────────────────────────────
@@ -1073,13 +1234,15 @@
   function updateOutputDetails() {
     const spd = curSpeed();
     const tone = toneShort();
-    $("actionSummary").textContent = `${state.format.toUpperCase()} · ${qualityLabel()} · ${fmtSpeed(spd)} · ${pitchShort()}` + (tone ? ` · ${tone}` : "");
+    const nClips = editActive() ? ceClips.length : 0;
+    $("actionSummary").textContent = `${state.format.toUpperCase()} · ${qualityLabel()} · ${fmtSpeed(spd)} · ${pitchShort()}` + (tone ? ` · ${tone}` : "") + (nClips ? ` · ${nClips} clip${nClips === 1 ? "" : "s"}` : "");
     $("odFormat").textContent = state.format.toUpperCase();
     $("odQuality").textContent = qualityLabel();
     $("odSpeed").textContent = fmtSpeed(spd);
     $("odTempo").textContent = tempoOf(spd);
     $("odPitch").textContent = $("preservePitch").checked ? "Preserved" : "Follows speed";
     $("odTone").textContent = toneLong() || "Flat";
+    $("odEdit").textContent = editActive() ? `${ceClips.length} clip${ceClips.length === 1 ? "" : "s"} · ${fmtTime(armTotal() / (spd || 1))}` : "Whole track";
     $("odSave").textContent = $("outDir").value || "—";
   }
 
@@ -1511,7 +1674,7 @@
   });
   $("tbRepeat").addEventListener("click", () => {
     repeatMode = (repeatMode + 1) % 3;
-    const a = $("previewAudio"); a.loop = (repeatMode === 2);
+    const a = $("previewAudio"); a.loop = (repeatMode === 2) && !editActive();
     $("tbRepeat").classList.toggle("on", repeatMode !== 0);
     $("tbRepeat").title = ["Repeat off","Repeat all","Repeat one"][repeatMode];
     toast(["Repeat off","Repeat all","Repeat one"][repeatMode], { glyph: "Repeat" });
@@ -1524,14 +1687,20 @@
     const pauseIcon = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M4 2 H6.6 V14 H4 Z M9.4 2 H12 V14 H9.4 Z"/></svg>';
     a.addEventListener("play", () => { $("tbPlay").innerHTML = pauseIcon; });
     a.addEventListener("pause", () => { $("tbPlay").innerHTML = playIcon; });
-    a.addEventListener("ended", () => { if (repeatMode === 2) { a.currentTime = 0; a.play().catch(()=>{}); } else if (qActive) advanceQueue(); });
+    a.addEventListener("ended", () => {
+      // A clip edit whose last clip runs to the end of the file: the arrangement
+      // decides what happens next, not the queue.
+      if (editActive()) { ceStep(true); return; }
+      if (repeatMode === 2) { a.currentTime = 0; a.play().catch(()=>{}); } else if (qActive) advanceQueue();
+    });
     a.addEventListener("timeupdate", () => {
-      const pct = a.duration ? (a.currentTime / a.duration * 100) : 0;
+      const tot = headTotal();
+      const pct = tot ? Math.min(100, headPos() / tot * 100) : 0;
       $("scrubFill").style.width = pct + "%"; $("scrubThumb").style.left = pct + "%";
       updateTimes();
     });
     // seek (pointer events so touch dragging works on phones)
-    function seekFromEvent(e) { const r = $("scrub").getBoundingClientRect(); const p = Math.min(1, Math.max(0, (e.clientX - r.left)/r.width)); if (a.duration) a.currentTime = p * a.duration; }
+    function seekFromEvent(e) { const r = $("scrub").getBoundingClientRect(); const p = Math.min(1, Math.max(0, (e.clientX - r.left)/r.width)); const tot = headTotal(); if (tot) seekHead(p * tot); }
     let seeking = false;
     $("scrub").addEventListener("pointerdown", (e) => { seeking = true; $("scrub").setPointerCapture(e.pointerId); seekFromEvent(e); });
     $("scrub").addEventListener("pointermove", (e) => { if (seeking) seekFromEvent(e); });
@@ -1539,11 +1708,12 @@
     $("scrub").addEventListener("pointercancel", () => { seeking = false; });
     // Keyboard seeking (was pointer-only): ←/→ 5s, Home/End jump.
     $("scrub").addEventListener("keydown", (e) => {
-      if (!a.duration) return;
+      const tot = headTotal();
+      if (!tot) return;
       const step = { ArrowLeft: -5, ArrowDown: -5, ArrowRight: 5, ArrowUp: 5 }[e.key];
-      if (step !== undefined) { e.preventDefault(); a.currentTime = Math.min(a.duration, Math.max(0, a.currentTime + step)); }
-      else if (e.key === "Home") { e.preventDefault(); a.currentTime = 0; }
-      else if (e.key === "End") { e.preventDefault(); a.currentTime = Math.max(0, a.duration - 0.5); }
+      if (step !== undefined) { e.preventDefault(); seekHead(Math.min(tot, Math.max(0, headPos() + step))); }
+      else if (e.key === "Home") { e.preventDefault(); seekHead(0); }
+      else if (e.key === "End") { e.preventDefault(); seekHead(Math.max(0, tot - 0.5)); }
     });
   })();
 
@@ -1563,6 +1733,7 @@
     $("repCount").value = 1;
     $("loopSection").checked = false;
     $("loopRow").classList.remove("on");
+    if (ceClips) clearEdit();   // so is a clip edit
     renderTrim();
   }
   function renderTrim() {
@@ -1582,6 +1753,7 @@
     const spd = curSpeed() || 1;
     const reps = Math.max(1, parseInt($("repCount").value, 10) || 1);
     $("trimOut").textContent = section > 0 ? "output " + fmtTime(section / spd * reps) : "—";
+    renderClipSummary();   // its output length depends on speed too
   }
   function trimSeconds(clientX) {
     const r = $("tlTrack").getBoundingClientRect();
@@ -1668,6 +1840,526 @@
       }
     });
   })();
+
+  // ── Clip editor ───────────────────────────────────────────────────────
+  // An edit is the source cut into clips, played in the order shown, each
+  // `repeat` times. Clip times are SOURCE seconds, like trim. While an edit is
+  // active the preview plays the arrangement (seeking the one <audio> element
+  // at each boundary), the player bar shows arrangement time, and /convert gets
+  // `clips` instead of trim/loops. It's per-song, like trim: a new source clears it.
+  const CE_MIN = 0.1, CE_MAX_CLIPS = 100, CE_MAX_REPEAT = 20, CE_MAX_PIECES = 100;
+  let ceSel = null, ceHist = [], ceUid = 1, ceCur = { i: 0, r: 0 }, ceRaf = 0, ceTimer = 0, ceDrag = null;
+  let cePeaks = null, cePeaksSrc = "";
+  const ceA = () => $("previewAudio");
+  const clipLen = c => c.to - c.from;
+  const clipOut = c => clipLen(c) * c.repeat;
+  const cePieces = () => (ceClips || []).reduce((n, c) => n + c.repeat, 0);
+  const fmtShort = t => t < 10 ? t.toFixed(1) + "s" : fmtTime(t);
+  const ceMk = (from, to, repeat = 1) => ({ id: ceUid++, from, to, repeat });
+  function editActive() { return !!(ceClips && ceClips.length); }
+  function ceIsOpen() { return !$("clipEditor").hidden; }
+  function armTotal() { return (ceClips || []).reduce((t, c) => t + clipOut(c), 0); }
+  function armOffset(i, r = 0) {
+    let t = 0;
+    for (let k = 0; k < i; k++) t += clipOut(ceClips[k]);
+    return t + r * (ceClips[i] ? clipLen(ceClips[i]) : 0);
+  }
+  // Playhead in arrangement seconds (source-rate; divide by speed to listen).
+  function armPos() {
+    const c = ceClips && ceClips[ceCur.i];
+    if (!c) return 0;
+    return armOffset(ceCur.i, ceCur.r) + Math.min(clipLen(c), Math.max(0, ceA().currentTime - c.from));
+  }
+  function armLocate(p) {
+    let acc = 0;
+    for (let i = 0; i < ceClips.length; i++) {
+      const c = ceClips[i], o = clipOut(c), len = clipLen(c);
+      if (p < acc + o || i === ceClips.length - 1) {
+        const off = Math.min(o, Math.max(0, p - acc));
+        const r = Math.min(c.repeat - 1, Math.floor(off / len));
+        return { i, r, t: c.from + Math.min(len, off - r * len) };
+      }
+      acc += o;
+    }
+    return { i: 0, r: 0, t: 0 };
+  }
+  function armSeek(p) {
+    if (!editActive()) return;
+    const L = armLocate(Math.max(0, Math.min(armTotal(), p)));
+    ceCur = { i: L.i, r: L.r };
+    const a = ceA();
+    // Skip no-op seeks (a split leaves the audio where it is) — each one is a blip.
+    if (a.src && Math.abs(a.currentTime - L.t) > 0.03) a.currentTime = L.t;
+    ceRenderHead(); updateTimes();
+  }
+
+  // ── Playback engine ──
+  // Runs every frame while playing, from timeupdate as a fallback (frames stop
+  // in a hidden window), and on `ended` (a last clip that runs to the file's end).
+  function ceStep(ended) {
+    const a = ceA(), c = ceClips && ceClips[ceCur.i];
+    if (!c) return;
+    const t = a.currentTime;
+    if (!ended && (t < c.from - 0.35 || t > c.to + 1.5)) {
+      // Moved by something other than the arrangement: follow it into a clip.
+      const k = ceClips.findIndex(x => t >= x.from && t < x.to);
+      if (k >= 0) ceCur = { i: k, r: 0 }; else armSeek(armPos());
+      return;
+    }
+    if (!ended && t < c.to - 0.012) return;
+    if (ceCur.r + 1 < c.repeat) { ceCur.r++; a.currentTime = c.from; }
+    else if (ceCur.i + 1 < ceClips.length) {
+      ceCur = { i: ceCur.i + 1, r: 0 };
+      const n = ceClips[ceCur.i];
+      // A clip that carries straight on from this one (an untouched split): no seek.
+      if (ended || Math.abs(n.from - c.to) > 0.02) a.currentTime = n.from;
+    } else { ceFinish(); return; }
+    if (ended) a.play().catch(() => {});
+  }
+  function ceFinish() {
+    const a = ceA();
+    ceCur = { i: 0, r: 0 };
+    a.currentTime = ceClips[0].from;
+    if (repeatMode === 2) { a.play().catch(() => {}); return; }
+    a.pause();
+    // Not while the editor is open: the next song would wipe the edit mid-work.
+    if (qActive && !ceIsOpen()) advanceQueue();
+  }
+  // Frames stop (and timeupdate is only ~4 a second) when the window is covered
+  // or minimised, which let joins overshoot by a quarter-second. A timer aimed
+  // at the end of the current clip keeps them tight either way; it re-checks at
+  // least every 250 ms so a seek or an edit can't leave it aimed at a stale end.
+  function ceArm() {
+    clearTimeout(ceTimer); ceTimer = 0;
+    const a = ceA(), c = editActive() && ceClips[ceCur.i];
+    if (!c || a.paused) return;
+    const ms = (c.to - 0.012 - a.currentTime) / (a.playbackRate || 1) * 1000;
+    ceTimer = setTimeout(() => { ceStep(false); ceArm(); }, Math.max(0, Math.min(250, ms)));
+  }
+  function ceLoop() {
+    ceRaf = 0;
+    if (!editActive() || ceA().paused) return;
+    ceStep(false);
+    ceRenderHead();
+    ceRaf = requestAnimationFrame(ceLoop);
+  }
+  ceA().addEventListener("play", () => {
+    $("cePlay").innerHTML = "❚❚ Pause <kbd>Space</kbd>";
+    if (!editActive()) return;
+    const c = ceClips[ceCur.i], t = ceA().currentTime;
+    if (!c || t < c.from - 0.05 || t > c.to + 0.05) armSeek(0);
+    if (!ceRaf) ceRaf = requestAnimationFrame(ceLoop);
+    ceArm();
+  });
+  ceA().addEventListener("pause", () => { $("cePlay").innerHTML = "▶ Play <kbd>Space</kbd>"; });
+  ceA().addEventListener("timeupdate", () => { if (editActive() && !ceA().paused) ceStep(false); });
+
+  // ── Editing ──
+  function ceChanged() {
+    ceA().loop = repeatMode === 2 && !editActive();
+    $("trimPanel").classList.toggle("has-edit", editActive());
+    renderClipSummary(); updateOutputDetails(); updateTimes();
+    if (ceIsOpen()) ceRender();
+  }
+  function clearEdit() {
+    ceClips = null; ceSel = null; ceHist = []; ceCur = { i: 0, r: 0 };
+    if (ceIsOpen()) closeClipEditor(true);
+    ceChanged();
+  }
+  // Run one edit. The playhead stays with the clip (and repeat) it was in when
+  // that clip survives the edit; otherwise it goes to `fn`'s return value, or
+  // the same arrangement position.
+  function ceEdit(fn) {
+    const before = ceClips[ceCur.i], r = ceCur.r, p = armPos();
+    ceHist.push(JSON.stringify(ceClips));
+    if (ceHist.length > 60) ceHist.shift();
+    const want = fn(p);
+    ceFollow(before && before.id, r, want ?? p);
+    ceChanged();
+  }
+  function ceFollow(id, r, p) {
+    if (!editActive()) { ceA().pause(); return; }
+    const k = ceClips.findIndex(c => c.id === id);
+    if (k >= 0 && r < ceClips[k].repeat) ceCur = { i: k, r };
+    else armSeek(Math.min(p, armTotal()));
+  }
+  function ceSplitTarget() {
+    if (!editActive()) return null;
+    const p = armPos();
+    let acc = 0;
+    for (let i = 0; i < ceClips.length; i++) {
+      const c = ceClips[i], o = clipOut(c), len = clipLen(c);
+      if (p >= acc && p < acc + o) {
+        const within = (p - acc) - Math.floor((p - acc) / len) * len;
+        return within > CE_MIN && within < len - CE_MIN ? { i, off: p - acc } : null;
+      }
+      acc += o;
+    }
+    return null;
+  }
+  function ceSplit() {
+    const tg = ceSplitTarget();
+    if (!tg) return;
+    const c0 = ceClips[tg.i];
+    if (ceClips.length + c0.repeat > CE_MAX_CLIPS) { toast(`An edit can have at most ${CE_MAX_CLIPS} clips.`, { glyph: "Clips" }); return; }
+    ceEdit(() => {
+      let { i, off } = tg, c = c0;
+      if (c.repeat > 1) {
+        // "×3, then cut" is ambiguous, so a repeated clip becomes separate copies first.
+        const copies = Array.from({ length: c.repeat }, () => ceMk(c.from, c.to));
+        ceClips.splice(i, 1, ...copies);
+        const which = Math.min(copies.length - 1, Math.floor(off / clipLen(c)));
+        i += which; off -= which * clipLen(c); c = ceClips[i];
+      }
+      const cut = c.from + off, b = ceMk(cut, c.to);
+      ceClips.splice(i, 1, ceMk(c.from, cut), b);
+      ceSel = b.id;
+    });
+  }
+  function ceSelected() { return (ceClips || []).find(c => c.id === ceSel) || null; }
+  function ceSetRepeat(c, n) {
+    n = Math.max(1, Math.min(CE_MAX_REPEAT, n));
+    if (n === c.repeat) return;
+    if (cePieces() - c.repeat + n > CE_MAX_PIECES) { toast(`An edit can have at most ${CE_MAX_PIECES} pieces, counting repeats.`, { glyph: "Clips" }); return; }
+    ceEdit(() => { c.repeat = n; });
+  }
+  function ceDup() { const c = ceSelected(); if (c) ceSetRepeat(c, c.repeat + 1); }
+  function ceDel() {
+    const i = ceClips ? ceClips.findIndex(c => c.id === ceSel) : -1;
+    if (i < 0) return;
+    ceEdit(() => {
+      ceClips.splice(i, 1);
+      ceSel = ceClips.length ? ceClips[Math.min(i, ceClips.length - 1)].id : null;
+      return armOffset(Math.min(i, ceClips.length - 1));   // ripple: on to whatever follows
+    });
+  }
+  function ceMove(i, to) {
+    if (to < 0 || to >= ceClips.length || to === i) return;
+    ceEdit(() => { const [c] = ceClips.splice(i, 1); ceClips.splice(to, 0, c); });
+  }
+  function ceUndo() {
+    if (!ceHist.length) return;
+    const before = ceClips[ceCur.i], r = ceCur.r, p = armPos();
+    ceClips = JSON.parse(ceHist.pop());
+    if (!ceSelected()) ceSel = ceClips.length ? ceClips[0].id : null;
+    ceFollow(before && before.id, r, p);
+    ceChanged();
+  }
+  function ceStartOver() {
+    ceEdit(() => { ceClips = [ceMk(0, trackDur)]; ceSel = ceClips[0].id; return 0; });
+  }
+  function ceTogglePlay() {
+    const a = ceA();
+    if (!a.src || !editActive()) return;
+    if (a.paused) a.play().catch(() => {}); else a.pause();
+  }
+
+  // ── Open / close ──
+  function openClipEditor() {
+    if (!trackDur) return;
+    if (!editActive()) {
+      // Start from the current trim and repeat, so nothing set there is lost.
+      const reps = Math.min(CE_MAX_REPEAT, Math.max(1, parseInt($("repCount").value, 10) || 1));
+      const from = trimStart, to = trimEnd > trimStart ? trimEnd : trackDur;
+      resetTrim(trackDur);            // the edit takes over from trim/repeat
+      ceClips = [ceMk(from, to, reps)];
+      ceHist = []; ceSel = ceClips[0].id; ceCur = { i: 0, r: 0 };
+      const t = ceA().currentTime;
+      if (t < from || t >= to) armSeek(0);
+    }
+    $("clipEditor").hidden = false;
+    document.querySelector(".app").inert = true;
+    $("ceTrack").textContent = nowPlaying ? "· " + (nowPlaying.title || nowPlaying.url) : "";
+    ceChanged();
+    ceLoadPeaks();
+    $("ceDone").focus();
+  }
+  function closeClipEditor(fromClear) {
+    if (ceDrag) { ceDrag = null; }
+    $("clipEditor").hidden = true;
+    document.querySelector(".app").inert = false;
+    if (!fromClear && ceClips) {
+      const c = ceClips[0];
+      if (!ceClips.length) {
+        clearEdit();
+        toast("Every clip was deleted, so the edit was removed.", { glyph: "Clips" });
+      } else if (ceClips.length === 1 && c.repeat === 1 && c.from <= 0.01 && c.to >= trackDur - 0.01) {
+        clearEdit();                  // one untouched clip of the whole track = no edit
+      }
+    }
+    $("openClips").focus({ preventScroll: true });
+  }
+  $("openClips").addEventListener("click", openClipEditor);
+  $("ceDone").addEventListener("click", () => closeClipEditor());
+  $("ceRemove").addEventListener("click", () => { clearEdit(); toast("Clip edit removed", { glyph: "Clips" }); });
+  $("clipSumClear").addEventListener("click", () => { clearEdit(); toast("Clip edit removed", { glyph: "Clips" }); });
+  $("cePlay").addEventListener("click", ceTogglePlay);
+  $("ceSplit").addEventListener("click", ceSplit);
+  $("ceDup").addEventListener("click", ceDup);
+  $("ceDel").addEventListener("click", ceDel);
+  $("ceUndo").addEventListener("click", ceUndo);
+  $("ceReset").addEventListener("click", ceStartOver);
+  // Capture phase, so these win over the page's own shortcuts while the sheet is up.
+  document.addEventListener("keydown", (e) => {
+    if (!ceIsOpen()) return;
+    if (e.key === "Escape") { e.preventDefault(); closeClipEditor(); return; }
+    if (e.target.closest && e.target.closest("input, textarea, select")) return;
+    const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+    let hit = true;
+    if (mod && k === "z") ceUndo();
+    else if (mod || e.altKey) hit = false;
+    else if (k === "s") ceSplit();
+    else if (k === "d") ceDup();
+    else if (k === "delete" || k === "backspace") ceDel();
+    else if (k === " ") ceTogglePlay();
+    else hit = false;
+    if (hit) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+
+  // ── Waveform ──
+  async function ceLoadPeaks() {
+    const src = ceA().getAttribute("src") || "";
+    const m = src.match(/\/serve\/([^?#]+)/);
+    if (!m || src === cePeaksSrc) return;
+    cePeaksSrc = src; cePeaks = null;
+    try {
+      const r = await fetch(`/peaks/${m[1]}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      if (src !== cePeaksSrc) return;
+      const mx = Math.max(0.001, ...d.peaks);   // quiet tracks still fill the lane
+      cePeaks = { amp: d.peaks.map(v => v / mx), dur: d.duration || trackDur };
+      if (ceIsOpen()) ceRender();
+    } catch (_) { cePeaksSrc = ""; }           // placeholder bars; retried next open
+  }
+  function ceWave(canvas, from, to, color, alpha, repeat = 1) {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    const g = canvas.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const P = cePeaks, mid = h / 2, seg = w / repeat;
+    for (let rr = 0; rr < repeat; rr++) {
+      const x0 = rr * seg, n = Math.max(1, Math.floor(seg / 3));
+      g.globalAlpha = alpha; g.fillStyle = color;
+      for (let b = 0; b < n; b++) {
+        let peak = 0.18;                          // until the waveform arrives
+        if (P) {
+          const t0 = from + (to - from) * b / n, t1 = from + (to - from) * (b + 1) / n;
+          const i0 = Math.floor(t0 / P.dur * P.amp.length);
+          const i1 = Math.max(i0 + 1, Math.ceil(t1 / P.dur * P.amp.length));
+          peak = 0;
+          for (let i = i0; i < i1 && i < P.amp.length; i++) peak = Math.max(peak, P.amp[i]);
+        }
+        const hh = Math.max(1, peak * h * 0.42);
+        g.fillRect(x0 + b * 3, mid - hh, 2, hh * 2);
+      }
+      if (rr) { g.globalAlpha = 0.5; g.fillStyle = "#0a1320"; g.fillRect(x0 - 1, 0, 2, h); }
+    }
+    g.globalAlpha = 1;
+  }
+
+  // ── Rendering ──
+  function ceRender() {
+    const lane = $("ceLane"), total = armTotal(), spd = curSpeed() || 1, sel = ceSelected();
+    lane.innerHTML = "";
+    const clips = ceClips || [];
+    if (!clips.length) {
+      const e = document.createElement("div");
+      e.className = "ce-empty"; e.textContent = "Every clip deleted — Undo, or Start over.";
+      lane.appendChild(e);
+    }
+    clips.forEach((c, i) => {
+      const el = document.createElement("div");
+      el.className = "ce-clip" + (c.id === ceSel ? " sel" : "");
+      el.style.flex = `${clipOut(c)} 0 0`;
+      el.tabIndex = 0;
+      el.dataset.i = i;
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-pressed", c.id === ceSel ? "true" : "false");
+      el.setAttribute("aria-label", `Clip ${i + 1}, ${fmtTime(c.from)} to ${fmtTime(c.to)}` + (c.repeat > 1 ? `, repeated ${c.repeat} times` : "") + ". Alt+arrows to move.");
+      el.innerHTML = `<canvas></canvas><span class="ce-tag">${i + 1}</span><span class="ce-len">${fmtShort(clipLen(c))}</span>` +
+        (c.repeat > 1 ? `<span class="ce-rep">×${c.repeat}</span>` : "");
+      el.addEventListener("pointerdown", (ev) => ceDragStart(ev, i));
+      el.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); ceSel = c.id; armSeek(armOffset(i)); ceRender(); ceFocusClip(i); }
+        else if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
+          ev.preventDefault(); const to = i + (ev.key === "ArrowLeft" ? -1 : 1);
+          ceSel = c.id; ceMove(i, to); ceFocusClip(Math.max(0, Math.min(clips.length - 1, to)));
+        } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+          ev.preventDefault(); const to = Math.max(0, Math.min(clips.length - 1, i + (ev.key === "ArrowLeft" ? -1 : 1)));
+          ceSel = clips[to].id; ceRender(); ceFocusClip(to);
+        }
+      });
+      lane.appendChild(el);
+    });
+    const ph = document.createElement("div");
+    ph.className = "ce-playhead"; ph.id = "cePlayhead"; ph.hidden = !total;
+    lane.appendChild(ph);
+    requestAnimationFrame(() => {
+      lane.querySelectorAll(".ce-clip").forEach((el) => {
+        const c = clips[+el.dataset.i];
+        if (c) ceWave(el.querySelector("canvas"), c.from, c.to, "#c89665", c.id === ceSel ? 0.9 : 0.6, c.repeat);
+      });
+      ceWave($("ceSrcCanvas"), 0, trackDur, "#e8e4d6", 0.35);
+    });
+
+    // Ruler, in listening time.
+    const ruler = $("ceRuler");
+    ruler.innerHTML = "";
+    if (total > 0) {
+      const listen = total / spd;
+      const step = [5, 10, 15, 30, 60, 120, 300, 600].find(s => listen / s <= 10) || 1200;
+      for (let t = 0; t <= listen; t += step) {
+        const d = document.createElement("div");
+        d.className = "tick"; d.style.left = (t / listen) * 100 + "%";
+        d.innerHTML = `<span>${fmtTime(t)}</span>`;
+        ruler.appendChild(d);
+      }
+    }
+
+    // Source strip: what's used.
+    const src = $("ceSrc");
+    src.querySelectorAll(".ce-used").forEach(n => n.remove());
+    clips.forEach(c => {
+      const u = document.createElement("div");
+      u.className = "ce-used";
+      u.style.left = (c.from / trackDur) * 100 + "%";
+      u.style.width = (clipLen(c) / trackDur) * 100 + "%";
+      src.appendChild(u);
+    });
+    $("ceSrcEnd").textContent = fmtTime(trackDur);
+    $("ceSrcInfo").textContent = cePeaks ? fmtTime(trackDur) + " source" : "Loading waveform…";
+
+    // Inspector.
+    const box = $("ceInspector");
+    if (!sel) box.innerHTML = `<p class="ce-note">Click a clip in the arrangement to select it.</p>`;
+    else {
+      box.innerHTML =
+        `<div class="ce-row"><span class="k">Source range</span><span class="v">${fmtTime(sel.from)} – ${fmtTime(sel.to)}</span></div>
+         <div class="ce-row"><span class="k">Clip length</span><span class="v">${fmtShort(clipLen(sel))}</span></div>
+         <div class="ce-row"><span class="k">Repeat</span><span class="v"><span class="ce-stepper">
+           <button class="btn" id="ceRepDown" aria-label="Fewer repeats">−</button>
+           <span class="n">×${sel.repeat}</span>
+           <button class="btn" id="ceRepUp" aria-label="More repeats">+</button>
+         </span></span></div>
+         <div class="ce-row"><span class="k">Takes up in export</span><span class="v hi">${fmtTime(clipOut(sel) / spd)}</span></div>`;
+      $("ceRepDown").disabled = sel.repeat <= 1;
+      $("ceRepUp").disabled = sel.repeat >= CE_MAX_REPEAT;
+      $("ceRepDown").onclick = () => ceSetRepeat(sel, sel.repeat - 1);
+      $("ceRepUp").onclick = () => ceSetRepeat(sel, sel.repeat + 1);
+    }
+
+    // Export summary.
+    const kept = clips.reduce((t, c) => t + clipLen(c), 0);
+    $("ceOutTotal").textContent = fmtTime(total / spd);
+    $("ceOutClips").textContent = clips.length;
+    $("ceOutKept").textContent = trackDur ? Math.round(Math.min(100, kept / trackDur * 100)) + "%" : "—";
+    $("ceOutSpeed").textContent = fmtSpeed(spd);
+    $("ceOutBreak").textContent = clips.length
+      ? `${fmtTime(total)} of source audio at ${fmtSpeed(spd)}, built from ${fmtTime(kept)} of the original.`
+      : "Nothing to export yet.";
+
+    $("ceSelLabel").textContent = sel ? `Clip ${clips.indexOf(sel) + 1} selected` : "No clip selected";
+    $("ceDup").disabled = !sel || sel.repeat >= CE_MAX_REPEAT;
+    $("ceDel").disabled = !sel;
+    $("ceUndo").disabled = !ceHist.length;
+    $("cePlay").disabled = !clips.length;
+    ceRenderHead();
+  }
+  function ceFocusClip(i) {
+    const el = $("ceLane").querySelectorAll(".ce-clip")[i];
+    if (el) el.focus({ preventScroll: true });
+  }
+  // Cheap per-frame update: playhead, clock, Split availability.
+  function ceRenderHead() {
+    if (!ceIsOpen()) return;
+    const total = armTotal(), spd = curSpeed() || 1, p = editActive() ? armPos() : 0;
+    const ph = $("cePlayhead"), el = $("ceLane").querySelectorAll(".ce-clip")[ceCur.i];
+    if (ph && el && ceClips[ceCur.i]) {
+      // Place it inside the clip's own box, so the gaps between clips don't skew it.
+      const frac = Math.min(1, Math.max(0, (p - armOffset(ceCur.i)) / clipOut(ceClips[ceCur.i])));
+      ph.style.left = (el.offsetLeft + frac * el.offsetWidth) + "px";
+    }
+    $("ceTime").textContent = `${fmtTime(p / spd)} / ${fmtTime(total / spd)}`;
+    if (trackDur) $("ceSrcHead").style.left = (ceA().currentTime / trackDur * 100) + "%";
+    $("ceSplit").disabled = !ceSplitTarget();
+  }
+  // Ruler: click / drag to move the playhead.
+  (function wireRuler() {
+    const r = $("ceRuler");
+    let on = false;
+    const seek = (e) => { const b = r.getBoundingClientRect(); armSeek(Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)) * armTotal()); };
+    r.addEventListener("pointerdown", (e) => { if (!editActive()) return; on = true; r.setPointerCapture(e.pointerId); seek(e); });
+    r.addEventListener("pointermove", (e) => { if (on) seek(e); });
+    ["pointerup", "pointercancel"].forEach(ev => r.addEventListener(ev, () => { on = false; }));
+  })();
+
+  // Clips: a click selects the clip and moves the playhead to that spot; a drag reorders.
+  function ceDragStart(ev, i) {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const el = ev.currentTarget;
+    ceSel = ceClips[i].id;
+    $("ceLane").querySelectorAll(".ce-clip").forEach((x, k) => { x.classList.toggle("sel", k === i); x.setAttribute("aria-pressed", k === i ? "true" : "false"); });
+    el.focus({ preventScroll: true });
+    el.setPointerCapture(ev.pointerId);
+    ceDrag = { i, el, x0: ev.clientX, moved: false, target: null };
+    const move = (e) => {
+      if (!ceDrag) return;
+      if (!ceDrag.moved && Math.abs(e.clientX - ceDrag.x0) < 5) return;
+      ceDrag.moved = true;
+      el.classList.add("dragging");
+      const lane = $("ceLane"), els = [...lane.querySelectorAll(".ce-clip")];
+      let k = els.findIndex(x => { const b = x.getBoundingClientRect(); return e.clientX < b.left + b.width / 2; });
+      if (k < 0) k = els.length;
+      lane.querySelectorAll(".ce-drop").forEach(n => n.remove());
+      const lb = lane.getBoundingClientRect();
+      const x = k < els.length ? els[k].getBoundingClientRect().left - lb.left : els[els.length - 1].getBoundingClientRect().right - lb.left;
+      const line = document.createElement("div");
+      line.className = "ce-drop"; line.style.left = Math.max(0, x - 1) + "px";
+      lane.appendChild(line);
+      ceDrag.target = k;
+    };
+    const up = (e) => {
+      el.removeEventListener("pointermove", move);
+      const d = ceDrag;
+      ceDrag = null;
+      if (!d) return;
+      if (d.moved) {
+        let to = d.target;
+        if (to != null && to > d.i) to--;
+        if (to != null && to !== d.i) { ceMove(d.i, to); return; }
+        ceRender();
+      } else {
+        const b = el.getBoundingClientRect(), c = ceClips[d.i];
+        const frac = Math.min(1, Math.max(0, (e.clientX - b.left) / b.width));
+        armSeek(armOffset(d.i) + frac * clipOut(c));
+        ceRender();
+      }
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up, { once: true });
+    el.addEventListener("pointercancel", () => { el.removeEventListener("pointermove", move); ceDrag = null; ceRender(); }, { once: true });
+  }
+  window.addEventListener("resize", () => { if (ceIsOpen()) ceRender(); });
+
+  // Trim panel summary while an edit is active.
+  function renderClipSummary() {
+    if (!editActive()) return;
+    const spd = curSpeed() || 1, n = ceClips.length;
+    $("clipSumText").textContent = `${n} clip${n === 1 ? "" : "s"} · output ${fmtTime(armTotal() / spd)}`;
+    const strip = $("clipSumStrip");
+    strip.innerHTML = "";
+    ceClips.forEach(c => {
+      const s = document.createElement("span");
+      s.style.flex = `${clipOut(c)} 0 0`;
+      if (c.repeat > 1) s.textContent = "×" + c.repeat;
+      strip.appendChild(s);
+    });
+  }
+
 
   // ── Volume (default 50%) ──────────────────────────────────────────────
   (function wireVolume() {
@@ -1756,10 +2448,14 @@
     if (!url && !state.localPath) { showError("Drop a file or paste a YouTube URL."); return; }
     if (!$("outDir").value.trim()) { showError("Choose an output folder."); return; }
     const body = { source: url, local_path: state.localPath || "", output_format: state.format, quality: state.quality, speed: curSpeed(), preserve_pitch: $("preservePitch").checked, eq: curTone(), output_dir: $("outDir").value.trim() };
-    // Only send a trim window when the user actually narrowed it.
-    if (!trimIsFull()) { body.trim_start = trimStart; body.trim_end = trimEnd; }
-    const reps = Math.max(1, parseInt($("repCount").value, 10) || 1);
-    if (reps > 1) body.loops = reps;
+    if (editActive()) {
+      body.clips = ceClips.map(c => ({ start: +c.from.toFixed(3), end: +c.to.toFixed(3), repeat: c.repeat }));
+    } else {
+      // Only send a trim window when the user actually narrowed it.
+      if (!trimIsFull()) { body.trim_start = trimStart; body.trim_end = trimEnd; }
+      const reps = Math.max(1, parseInt($("repCount").value, 10) || 1);
+      if (reps > 1) body.loops = reps;
+    }
     $("convertBtn").disabled = true;
     $("barFill").style.width = "0%"; $("progressPct").textContent = "0%"; $("statusLine").textContent = "Starting…";
     showProgress(true, "Working");

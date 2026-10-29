@@ -16,6 +16,7 @@ your Wi-Fi (e.g. your phone) — it prints the address and a QR code to scan.
 from __future__ import annotations
 
 import argparse
+import array
 import ipaddress
 import math
 import os
@@ -163,6 +164,42 @@ def _parse_eq(data: dict):
     return out, None
 
 
+MAX_CLIPS = 100
+MAX_CLIP_REPEAT = 20
+
+
+def _parse_clips(data: dict):
+    """Validate the optional clip edit. Returns (clips | None, error_message).
+    Missing / null → no edit. Otherwise a non-empty list of
+    {start, end, repeat}: finite seconds, end > start, repeat 1–20, and at most
+    converter.MAX_SEGMENTS pieces once repeats are expanded."""
+    raw = data.get("clips")
+    if raw is None:
+        return None, None
+    if not isinstance(raw, list) or not raw:
+        return None, "The clip edit must be a non-empty list of clips."
+    if len(raw) > MAX_CLIPS:
+        return None, f"A clip edit can have at most {MAX_CLIPS} clips."
+    out, pieces = [], 0
+    for i, c in enumerate(raw, 1):
+        if not isinstance(c, dict):
+            return None, f"Clip {i} must be an object like {{start, end, repeat}}."
+        s, e, r = c.get("start"), c.get("end"), c.get("repeat", 1)
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+               for v in (s, e)):
+            return None, f"Clip {i} needs a start and end in seconds."
+        if s < 0 or e - s < 0.05:
+            return None, f"Clip {i} is too short or out of range."
+        if isinstance(r, bool) or not isinstance(r, int) or not (1 <= r <= MAX_CLIP_REPEAT):
+            return None, f"Clip {i} can repeat 1 to {MAX_CLIP_REPEAT} times."
+        pieces += r
+        out.append({"start": round(float(s), 3), "end": round(float(e), 3), "repeat": r})
+    if pieces > converter.MAX_SEGMENTS:
+        return None, (f"That edit has {pieces} pieces once repeats are counted; "
+                      f"the limit is {converter.MAX_SEGMENTS}.")
+    return out, None
+
+
 def _inside_uploads(path: str) -> bool:
     """Local files may only come from our own upload folder — the UI only ever
     sends /upload results, and anything else let a LAN device convert (and then
@@ -245,6 +282,43 @@ def serve_upload(filename: str):
     """Stream a previously-uploaded or fetched preview file back to the browser.
     send_from_directory rejects path traversal and resolves only within UPLOAD_DIR."""
     return send_from_directory(UPLOAD_DIR, filename, conditional=True)
+
+
+_PEAKS_CACHE: dict = {}
+PEAK_BUCKETS = 1500
+
+
+@app.route("/peaks/<path:filename>")
+def peaks(filename: str):
+    """Waveform overview of a previewable file for the clip editor: the loudest
+    sample in each of ~1500 slices, 0–1. ffmpeg decodes to 8 kHz mono so a long
+    mix or a video costs a few MB here instead of gigabytes in the browser."""
+    path = UPLOAD_DIR / Path(filename).name            # same rule as /serve
+    if not path.is_file():
+        return jsonify({"error": "File not found."}), 404
+    key = (path.name, path.stat().st_mtime_ns)
+    if key in _PEAKS_CACHE:
+        return jsonify(_PEAKS_CACHE[key])
+    r = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "8000",
+         "-f", "s16le", "-"],
+        capture_output=True, timeout=120,
+    )
+    if r.returncode != 0 or not r.stdout:
+        return jsonify({"error": "Couldn't read the audio for a waveform."}), 500
+    samples = array.array("h")
+    samples.frombytes(r.stdout[: len(r.stdout) // 2 * 2])
+    n = len(samples)
+    step = max(1, n // PEAK_BUCKETS)
+    out = []
+    for i in range(0, n, step):
+        seg = samples[i:i + step]
+        out.append(round(max(max(seg), -min(seg)) / 32768, 3))
+    result = {"peaks": out, "duration": n / 8000}
+    if len(_PEAKS_CACHE) > 32:
+        _PEAKS_CACHE.clear()
+    _PEAKS_CACHE[key] = result
+    return jsonify(result)
 
 
 @app.route("/preview_youtube", methods=["POST"])
@@ -407,6 +481,7 @@ def _run_job(job: Job, params: dict) -> None:
             end=params.get("trim_end"),
             loops=int(params.get("loops") or 1),
             eq=params.get("eq"),
+            clips=params.get("clips"),
         )
         with job.lock:
             job.status = "done"
@@ -494,6 +569,10 @@ def start_convert():
     if err:
         return jsonify({"error": err}), 400
     data["eq"] = eq
+    clips, err = _parse_clips(data)
+    if err:
+        return jsonify({"error": err}), 400
+    data["clips"] = clips
 
     job = Job(id=uuid.uuid4().hex)
     with _JOBS_LOCK:

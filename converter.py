@@ -177,12 +177,16 @@ def _audio_filter(speed: float, preserve_pitch: bool, sample_rate: int) -> str:
 
 def _build_output_name(src: str, speed: float, ext: str, out_dir: str,
                        start: Optional[float] = None, end: Optional[float] = None,
-                       loops: int = 1, eq: Optional[dict] = None) -> str:
+                       loops: int = 1, eq: Optional[dict] = None,
+                       n_clips: int = 0) -> str:
     """Generate e.g. 'mytrack_0.75x.mp3', or 'mytrack_0.75x_t12-40_x3.mp3' when
-    a section was trimmed and/or repeated. Avoids collisions."""
+    a section was trimmed and/or repeated ('_clips4' for a clip edit). Avoids
+    collisions."""
     stem = Path(src).stem
     parts = [stem, f"{speed:g}x"]          # trims 1.000 -> 1, 0.750 -> 0.75
-    if start is not None or end is not None:
+    if n_clips:
+        parts.append(f"clips{n_clips}")
+    elif start is not None or end is not None:
         s = 0.0 if start is None else start
         parts.append(f"t{s:g}-{end:g}" if end is not None else f"t{s:g}")
     if loops and loops > 1:
@@ -242,6 +246,72 @@ def _extract_segment(input_path: str, start: Optional[float], end: Optional[floa
     return tmp
 
 
+MAX_SEGMENTS = 100        # clips × repeats; each becomes one ffmpeg input
+JOIN_FADE = 0.005         # seconds of fade at a real cut, so joins don't click
+
+
+def _clip_segments(clips: list, duration: Optional[float]) -> tuple[list, float]:
+    """Expand [{start, end, repeat}] into the source ranges to play, in order.
+
+    Returns (segments, total_seconds). Segments that continue exactly where the
+    previous one stopped (a split that was never rearranged) are merged, so they
+    cost no extra input and get no join. The total is the same either way.
+    """
+    expanded = []
+    for i, c in enumerate(clips, 1):
+        s = max(0.0, float(c["start"]))
+        e = float(c["end"])
+        if duration:
+            # For a YouTube link the export input is a fresh download, not the
+            # preview file — allow it to be a hair shorter than what was edited.
+            e = min(e, duration)
+            if s >= duration - 0.05:
+                raise ConversionError(f"Clip {i} starts after the end of the track.")
+        if e - s < 0.05:
+            raise ConversionError(f"Clip {i} is too short.")
+        expanded += [(s, e)] * int(c.get("repeat") or 1)
+    if not expanded:
+        raise ConversionError("The clip edit is empty — add a clip or remove the edit.")
+    if len(expanded) > MAX_SEGMENTS:
+        raise ConversionError(f"That edit has {len(expanded)} pieces once repeats are "
+                              f"counted; the limit is {MAX_SEGMENTS}.")
+    total = sum(e - s for s, e in expanded)
+    merged = [list(expanded[0])]
+    for s, e in expanded[1:]:
+        if abs(s - merged[-1][1]) < 0.001:
+            merged[-1][1] = e
+        else:
+            merged.append([s, e])
+    return [tuple(m) for m in merged], total
+
+
+def _clip_graph(segments: list, video: bool, audio_filter: str, speed: float) -> str:
+    """filter_complex that concatenates one input per segment, then applies
+    the usual speed (+ tone) chain to the joined result."""
+    parts, cat = [], ""
+    last = len(segments) - 1
+    for k, (s, e) in enumerate(segments):
+        chain = "asetpts=PTS-STARTPTS"
+        if k > 0:
+            chain += f",afade=t=in:st=0:d={JOIN_FADE}"
+        if k < last:
+            chain += f",afade=t=out:st={max(0.0, e - s - JOIN_FADE):.4f}:d={JOIN_FADE}"
+        parts.append(f"[{k}:a:0]{chain}[a{k}]")
+        if video:
+            parts.append(f"[{k}:v:0]setpts=PTS-STARTPTS[v{k}]")
+            cat += f"[v{k}][a{k}]"
+        else:
+            cat += f"[a{k}]"
+    n = len(segments)
+    if video:
+        parts.append(f"{cat}concat=n={n}:v=1:a=1[cv][ca]")
+        parts.append(f"[cv]setpts={1.0/speed:.6f}*PTS[vout]")
+    else:
+        parts.append(f"{cat}concat=n={n}:v=0:a=1[ca]")
+    parts.append(f"[ca]{audio_filter}[aout]")
+    return ";".join(parts)
+
+
 _TIME_RE = re.compile(r"time=(\d+):(\d+):(\d+\.?\d*)")
 # ffmpeg prefixes log lines with internal context like "[in#0 @ 000002197b8e6fc0]".
 _FF_NOISE = re.compile(r"\[[^\]]*@ [0-9a-fA-Fx]+\]\s*")
@@ -273,12 +343,15 @@ def convert(
     end: Optional[float] = None,     # trim: section end in source seconds
     loops: int = 1,                  # repeat the (trimmed) section N times
     eq: Optional[dict] = None,       # tone: {"bass","mid","treble"} in dB (±12)
+    clips: Optional[list] = None,    # clip edit: [{start, end, repeat}] in order
 ) -> str:
     """Run ffmpeg to produce the sped/slowed file. Returns the output path.
 
     `start`/`end` trim to a section of the source; `loops` repeats that section
     (1 = play once). Trim positions are in *source* time, matching the preview
     player's timeline (which reports media time regardless of playback speed).
+    `clips` (from the clip editor) replaces trim/loops: the listed source ranges
+    are played in order, each `repeat` times, then sped up/slowed as a whole.
     """
     if not (MIN_SPEED <= speed <= MAX_SPEED):
         raise ConversionError(f"Speed must be between {MIN_SPEED} and {MAX_SPEED}.")
@@ -301,9 +374,14 @@ def convert(
     if eq_chain:
         audio_filter = f"{audio_filter},{eq_chain}"
 
-    # ── Normalise the trim window ──
+    # ── Clip edit, or normalise the trim window ──
+    segments = None
     loops = max(1, int(loops or 1))
-    if start is not None or end is not None:
+    if clips:
+        segments, clip_total = _clip_segments(clips, duration)
+        start = end = None
+        loops = 1
+    elif start is not None or end is not None:
         s = 0.0 if start is None else max(0.0, float(start))
         e = float(end) if end is not None else (duration or 0.0)
         if duration:
@@ -318,7 +396,8 @@ def convert(
     # ".part" file that's renamed over it only on success, so a failed or killed
     # conversion never leaves a truncated song in the output folder.
     out_path = _build_output_name(input_path, speed, output_format, output_dir,
-                                  start, end, loops, eq)
+                                  start, end, loops, eq,
+                                  n_clips=len(clips) if segments else 0)
     final = Path(out_path)
     part = final.with_name(f"{final.stem}.part{final.suffix}")  # ffmpeg muxes by last extension
 
@@ -336,7 +415,16 @@ def convert(
         # ── Choose the source: loops need the section cut out first (see
         #    _extract_segment for why -stream_loop can't do it in one pass) ──
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "info"]
-        if loops > 1:
+        graph = None
+        if segments:
+            # One input per piece, each seeked to its own range (input -ss is
+            # accurate when re-encoding), joined by the concat filter. Inputs are
+            # read in turn, so memory doesn't grow with the length of the edit.
+            for s0, e0 in segments:
+                cmd += ["-ss", f"{s0:.3f}", "-t", f"{e0 - s0:.3f}", "-i", input_path]
+            total_input_secs = clip_total
+            graph = _clip_graph(segments, output_format == "mp4", audio_filter, speed)
+        elif loops > 1:
             if on_progress:
                 on_progress(0.0)
             temp_segment = _extract_segment(input_path, start, end, output_format)
@@ -353,7 +441,19 @@ def convert(
         # (atempo, asetrate, setpts) makes the output input÷speed long.
         expected_out = (total_input_secs / speed) if total_input_secs else None
 
-        if output_format == "mp3":
+        if graph:
+            # -filter:a / -filter:v can't be combined with -filter_complex, so the
+            # speed and tone chains live at the end of the graph instead.
+            cmd += ["-filter_complex", graph]
+            if output_format == "mp4":
+                cmd += ["-map", "[vout]", "-map", "[aout]",
+                        "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                        "-c:a", "aac", "-b:a", audio_bitrate, "-aac_coder", "twoloop"]
+            else:
+                cmd += ["-map", "[aout]", "-c:a", "libmp3lame", "-b:a", audio_bitrate,
+                        "-compression_level", "0"]
+            cmd += [str(part)]
+        elif output_format == "mp3":
             cmd += [
                 "-vn",
                 "-filter:a", audio_filter,
